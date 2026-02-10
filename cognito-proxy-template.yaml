@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Cognito OAuth2 Token Proxy with API Gateway Caching'
+
+Parameters:
+  CognitoDomain:
+    Type: String
+    Description: Your Cognito domain WITHOUT https:// (e.g., your-domain.auth.region.amazoncognito.com or custom domain)
+  StageName:
+    Type: String
+    Default: 'dev'
+    Description: Name of the API Gateway deployment stage
+  CacheTtlInSeconds:
+    Type: Number
+    Default: 3600
+    Description: Cache TTL in seconds (default 1 hour)
+  CacheSize:
+    Type: String
+    Default: '0.5'
+    AllowedValues: ['0.5', '1.6', '6.1', '13.5', '28.4', '58.2', '118', '237']
+    Description: Cache size in GB
+
+Resources:
+  # API Key for WAF validation
+  ProxyAPIKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-cognito-proxy-key'
+      Description: 'API Key for Cognito proxy WAF validation'
+      Enabled: true
+
+  # Usage Plan for API Key
+  ProxyUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: 
+      - ApiGatewayStage
+      - ApiGatewayDeployment
+    Properties:
+      UsagePlanName: !Sub '${AWS::StackName}-cognito-proxy-plan'
+      Description: 'Usage plan for Cognito proxy'
+      ApiStages:
+        - ApiId: !Ref CognitoProxy
+          Stage: !Ref StageName
+
+  # Link API Key to Usage Plan
+  ProxyUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ProxyAPIKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ProxyUsagePlan
+
+  CognitoProxy:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: CognitoAuthProxy
+      Description: Proxy to Cognito OAuth2 token endpoint with caching
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  OAuth2Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CognitoProxy
+      ParentId: !GetAtt CognitoProxy.RootResourceId
+      PathPart: 'oauth2'
+
+  TokenResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CognitoProxy
+      ParentId: !Ref OAuth2Resource
+      PathPart: 'token'
+
+  TokenMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CognitoProxy
+      ResourceId: !Ref TokenResource
+      HttpMethod: POST
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.header.Authorization: false
+        method.request.header.Accept: false
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+      Integration:
+        Type: HTTP
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'https://${CognitoDomain}/oauth2/token'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        CacheNamespace: !Ref TokenResource
+        CacheKeyParameters:
+          - 'integration.request.header.Authorization'
+        RequestParameters:
+          integration.request.header.Authorization: 'method.request.header.Authorization'
+          integration.request.header.X-API-Key: 'context.identity.apiKey'
+        RequestTemplates:
+          application/x-www-form-urlencoded: !Sub |
+            #if($input.params().header.containsKey("Authorization"))
+            #set($context.requestOverride.header.Authorization = $input.params().header.get("Authorization"))
+            #set($body = $input.body)
+            #set($pairs = $body.split("&"))
+            #set($hasScope = false)
+            #set($scopeValue = "")
+            #foreach($pair in $pairs)
+            #set($kv = $pair.split("="))
+            #if($kv[0] == "scope")
+            #set($hasScope = true)
+            #if($kv.size() > 1)
+            #set($scopeValue = $kv[1])
+            #end
+            #end
+            #end
+            #if($hasScope)
+            grant_type=client_credentials&scope=$scopeValue
+            #else
+            grant_type=client_credentials&scope=
+            #end
+            #elseif($input.params().querystring.containsKey("client_id") && $input.params().querystring.containsKey("client_secret"))
+            #set($clientId = $input.params().querystring.get("client_id"))
+            #set($clientSecret = $input.params().querystring.get("client_secret"))
+            #set($credentials = "$clientId:$clientSecret")
+            #set($encodedCreds = $util.base64Encode($credentials))
+            #set($context.requestOverride.header.Authorization = "Basic $encodedCreds")
+            #if($input.params().querystring.containsKey("scope"))
+            grant_type=client_credentials&scope=$input.params().querystring.get("scope")
+            #else
+            grant_type=client_credentials&scope=
+            #end
+            #else
+            #set($body = $input.body)
+            #set($pairs = $body.split("&"))
+            #set($clientId = "")
+            #set($clientSecret = "")
+            #set($hasScope = false)
+            #set($scopeValue = "")
+            #foreach($pair in $pairs)
+            #set($kv = $pair.split("="))
+            #if($kv[0] == "client_id")
+            #set($clientId = $kv[1])
+            #end
+            #if($kv[0] == "client_secret")
+            #set($clientSecret = $kv[1])
+            #end
+            #if($kv[0] == "scope")
+            #set($hasScope = true)
+            #if($kv.size() > 1)
+            #set($scopeValue = $kv[1])
+            #end
+            #end
+            #end
+            #if($clientId && $clientSecret)
+            #set($credentials = "$clientId:$clientSecret")
+            #set($encodedCreds = $util.base64Encode($credentials))
+            #set($context.requestOverride.header.Authorization = "Basic $encodedCreds")
+            #end
+            #if($hasScope)
+            grant_type=client_credentials&scope=$scopeValue
+            #else
+            grant_type=client_credentials&scope=
+            #end
+            #end
+            #set($context.requestOverride.header.Accept = "application/json")
+        IntegrationResponses:
+          - StatusCode: '200'
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref CognitoProxy
+      DeploymentId: !Ref ApiGatewayDeployment
+      StageName: !Ref StageName
+      CacheClusterEnabled: true
+      CacheClusterSize: !Ref CacheSize
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          CachingEnabled: false
+        - ResourcePath: '/oauth2/token'
+          HttpMethod: 'POST'
+          CachingEnabled: true
+          CacheTtlInSeconds: !Ref CacheTtlInSeconds
+          CacheDataEncrypted: true
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - TokenMethod
+    Properties:
+      RestApiId: !Ref CognitoProxy
+      Description: 'Deployment for Cognito OAuth2 Token Proxy'
+
+Outputs:
+  ApiEndpoint:
+    Description: 'API Gateway endpoint URL for the OAuth2 token proxy'
+    Value: !Sub 'https://${CognitoProxy}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/oauth2/token'
+  CacheClusterSize:
+    Description: 'Cache cluster size'
+    Value: !Ref CacheSize
+  CacheTtl:
+    Description: 'Cache TTL in seconds'
+    Value: !Ref CacheTtlInSeconds
+  ProxyAPIKey:
+    Description: 'API Key for WAF validation (use this in WAF rules)'
+    Value: !Ref ProxyAPIKey

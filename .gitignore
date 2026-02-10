@@ -1,0 +1,12 @@
+# Ignore everything by default
+*
+
+# Allow specific files and directories
+!.gitignore
+!README.md
+!cognito-proxy-template.yaml
+!architecturediagrams/
+!architecturediagrams/**
+
+# macOS
+.DS_Store
