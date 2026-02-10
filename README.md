@@ -91,6 +91,51 @@ This architecture ensures that:
 - **Amazon Cognito User Pool**: OAuth2 token endpoint for client credentials flow
 - **AWS Lambda**: Custom resource function to retrieve API key value for WAF configuration during deployment
 
+## Project Structure
+
+```
+.
+├── README.md                                    # This file - project documentation
+├── LICENSE                                      # MIT-0 License
+├── CONTRIBUTING.md                              # Contribution guidelines
+├── cognito-proxy-template.yaml                  # CloudFormation template (alternative deployment)
+├── cdk/                                         # AWS CDK implementation (recommended)
+│   ├── app.py                                   # CDK app entry point with parameter handling
+│   ├── cdk.json                                 # CDK configuration
+│   ├── requirements.txt                         # Python dependencies
+│   ├── cdk/
+│   │   ├── __init__.py                          # Python package initialization
+│   │   └── cognito_proxy_stack.py               # Main CDK stack definition
+│   └── tests/                                   # CDK unit tests
+│       └── unit/
+│           └── test_cdk_stack.py                # Stack validation tests
+├── docs/                                        # Documentation
+│   ├── images/
+│   │   ├── architecture-diagram.png             # Basic architecture diagram
+│   │   └── architecture-with-waf.png            # Architecture with WAF protection
+│   └── testing-guide.md                         # Comprehensive testing instructions
+└── architecturediagrams/                        # Original architecture diagrams (source files)
+    ├── CognitoM2MArchitecture.drawio            # Editable diagram source
+    ├── CognitoM2MArchitecture-Page-1.drawio.png # Basic architecture export
+    └── CognitoM2MArchitecture-Page-2.drawio.png # Architecture with WAF export
+```
+
+### Key Files
+
+- **cdk/cdk/cognito_proxy_stack.py**: Contains the complete infrastructure definition including API Gateway, caching configuration, API key management, Lambda custom resource, and optional WAF WebACL
+- **cdk/app.py**: Entry point that handles CDK context parameters and validates required inputs
+- **cognito-proxy-template.yaml**: CloudFormation template for users who prefer CloudFormation over CDK
+- **docs/testing-guide.md**: Step-by-step testing instructions with expected responses for all scenarios
+
+### Excluded Files
+
+The following files are excluded from version control (see `.gitignore`):
+- `deploy-cdk.sh`: Local deployment script with your specific configuration
+- `deployment-commands.txt`: Deployment commands with sensitive parameters
+- `cdk-outputs.json`: Stack outputs including API endpoint and API key ID
+- `cdk/cdk.out/`: CDK synthesis output
+- `cdk/.venv/`: Python virtual environment
+
 ## Features
 
 - **Token Caching**: Reduces Cognito API calls and improves response times
