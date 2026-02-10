@@ -104,14 +104,34 @@ pip install -r requirements.txt
 
 #### Deploy
 
+Create a deployment script or use the command directly:
+
 ```bash
+cd cdk
 cdk deploy \
   --profile Cognito-Isengard6 \
-  -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com \
+  -c cognito_domain=YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com \
   -c stage_name=dev \
   -c cache_ttl_seconds=3600 \
-  -c cache_size_gb=0.5
+  -c cache_size_gb=0.5 \
+  --outputs-file ../cdk-outputs.json
 ```
+
+**Note**: Create local deployment scripts (`deploy-cdk.sh` or `deployment-commands.txt`) with your specific configuration. These files are gitignored to avoid committing sensitive domain information.
+
+#### View Outputs
+
+After deployment:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name CognitoProxyStack \
+  --profile Cognito-Isengard6 \
+  --query 'Stacks[0].Outputs' \
+  --output table
+```
+
+Or check the generated `cdk-outputs.json` file.
 
 See `cdk/README.md` for detailed CDK documentation.
 

@@ -17,5 +17,10 @@ cdk/**/__pycache__/
 cdk/**/*.pyc
 cdk/**/*.egg-info/
 
+# Ignore deployment scripts and outputs (contain sensitive config)
+deploy-cdk.sh
+deployment-commands.txt
+cdk-outputs.json
+
 # macOS
 .DS_Store
