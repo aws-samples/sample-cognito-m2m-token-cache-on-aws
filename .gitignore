@@ -4,9 +4,13 @@
 # Allow specific files and directories
 !.gitignore
 !README.md
+!LICENSE
+!CONTRIBUTING.md
 !cognito-proxy-template.yaml
 !architecturediagrams/
 !architecturediagrams/**
+!docs/
+!docs/**
 !cdk/
 !cdk/**
 
