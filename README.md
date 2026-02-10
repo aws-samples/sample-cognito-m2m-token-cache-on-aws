@@ -1,6 +1,31 @@
 # Amazon Cognito OAuth2 Token Proxy with Caching
 
-This solution provides an API Gateway proxy in front of Amazon Cognito's OAuth2 token endpoint, adding intelligent caching and API key-based access control to reduce load on Cognito and improve performance for machine-to-machine (M2M) authentication scenarios.
+This solution provides an Amazon API Gateway proxy in front of Amazon Cognito's OAuth2 token endpoint, adding intelligent caching and API key-based access control. By caching OAuth2 access tokens at the API Gateway layer, this solution significantly reduces the number of requests to Amazon Cognito, resulting in lower costs, improved performance, and better scalability for machine-to-machine (M2M) authentication scenarios.
+
+## What This Solution Does
+
+In typical M2M authentication scenarios, applications frequently request OAuth2 access tokens from Amazon Cognito. Each request to Cognito incurs API costs and adds latency. This solution addresses these challenges by:
+
+1. **Intercepting Token Requests**: API Gateway sits between your applications and Cognito, intercepting all OAuth2 token requests
+2. **Intelligent Caching**: Valid tokens are cached at the API Gateway layer based on the Authorization header, eliminating redundant Cognito calls
+3. **Automatic Cache Management**: Cached tokens are automatically invalidated based on configurable TTL (time-to-live) settings
+4. **Access Control**: API key authentication ensures only authorized applications can request tokens
+5. **Optional WAF Protection**: AWS WAF can be enabled to prevent unauthorized direct access to your Cognito User Pool
+
+## Cost Reduction Scenario
+
+Consider an application that requests a new access token every 5 minutes (12 times per hour). With a 1-hour token expiration and this caching solution:
+
+- **Without caching**: 12 Cognito API calls per hour = 288 calls per day per application
+- **With caching**: 1 Cognito API call per hour = 24 calls per day per application
+- **Reduction**: 91.7% fewer Cognito API calls
+
+For 100 applications making similar requests:
+- **Without caching**: 28,800 Cognito calls per day
+- **With caching**: 2,400 Cognito calls per day
+- **Monthly savings**: ~792,000 fewer Cognito API calls
+
+At Cognito's pricing of $0.0055 per API call (after free tier), this represents significant cost savings while also improving response times through cache hits (typically <10ms vs 100-200ms for Cognito calls).
 
 ## Table of Contents
 
@@ -25,25 +50,46 @@ This solution provides an API Gateway proxy in front of Amazon Cognito's OAuth2 
 
 The solution deploys an Amazon API Gateway REST API that proxies requests to Amazon Cognito's OAuth2 token endpoint. The proxy adds a caching layer to reduce latency and Cognito API calls, and requires API key authentication for access control.
 
+### Architecture Diagram
+
 ![Architecture Diagram](docs/images/architecture-diagram.png)
+
+The diagram above illustrates the basic architecture without WAF protection. The request flow is:
+
+1. **Client Application** sends an OAuth2 token request to the API Gateway endpoint with an API key
+2. **API Gateway** validates the API key and checks its cache for a valid token
+3. **Cache Hit**: If a valid cached token exists, API Gateway returns it immediately (typically <10ms)
+4. **Cache Miss**: If no cached token exists, API Gateway forwards the request to Cognito
+5. **Amazon Cognito** validates the client credentials and returns an access token
+6. **API Gateway** caches the token based on the Authorization header and returns it to the client
+7. Subsequent requests with the same credentials receive the cached token until TTL expires
+
+### Architecture with WAF Protection
+
+![Architecture with WAF](docs/images/architecture-with-waf.png)
+
+When WAF protection is enabled, an additional security layer is added:
+
+1. **AWS WAF WebACL** is associated with the Cognito User Pool
+2. **Direct Cognito Access** is blocked by default unless the request includes the correct API key
+3. **API Gateway** forwards requests to Cognito with the API key header
+4. **WAF Validation** checks the `x-api-key` header value before allowing the request to reach Cognito
+5. **Unauthorized Requests** receive a 403 Forbidden response with a descriptive error message
+6. **Authorized Requests** (with correct API key) proceed to Cognito for token generation
+
+This architecture ensures that:
+- Only requests through API Gateway (with valid API key) can access Cognito
+- Direct access to Cognito is prevented, enforcing centralized access control
+- All token requests benefit from caching, regardless of the authentication method used
 
 ### Components
 
-- **Amazon API Gateway**: Regional REST API with `/oauth2/token` endpoint
-- **API Gateway Cache**: Configurable cache (0.5GB - 237GB) with TTL-based expiration
-- **API Key**: Required for all requests to the proxy endpoint
+- **Amazon API Gateway**: Regional REST API with `/oauth2/token` endpoint that proxies requests to Cognito
+- **API Gateway Cache**: Configurable cache cluster (0.5GB - 237GB) with TTL-based expiration for storing tokens
+- **API Key**: Required for all requests to the proxy endpoint, managed through API Gateway usage plans
 - **AWS WAF (Optional)**: WebACL that validates API key before allowing direct Cognito access
 - **Amazon Cognito User Pool**: OAuth2 token endpoint for client credentials flow
-- **AWS Lambda**: Custom resource to retrieve API key value for WAF configuration
-
-### User Flow
-
-1. Client application sends OAuth2 token request to API Gateway with API key
-2. API Gateway checks cache for existing valid token
-3. On cache miss, API Gateway forwards request to Cognito
-4. Cognito validates credentials and returns access token
-5. API Gateway caches response and returns token to client
-6. Subsequent requests with same credentials return cached token (cache hit)
+- **AWS Lambda**: Custom resource function to retrieve API key value for WAF configuration during deployment
 
 ## Features
 
