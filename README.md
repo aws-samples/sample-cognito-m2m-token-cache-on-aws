@@ -95,9 +95,9 @@ This architecture ensures that:
 
 ```
 .
-├── README.md                                    # This file - project documentation
-├── LICENSE                                      # MIT-0 License
-├── CONTRIBUTING.md                              # Contribution guidelines
+├── README.md                                    # Complete project documentation and deployment guide
+├── LICENSE                                      # MIT-0 License - permissive open source license
+├── CONTRIBUTING.md                              # Guidelines for contributing to this project
 ├── cognito-proxy-template.yaml                  # CloudFormation template (alternative deployment)
 ├── cdk/                                         # AWS CDK implementation (recommended)
 │   ├── app.py                                   # CDK app entry point with parameter handling
