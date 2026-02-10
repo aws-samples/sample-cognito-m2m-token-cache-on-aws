@@ -123,15 +123,6 @@ This architecture ensures that:
 - **cognito-proxy-template.yaml**: CloudFormation template for users who prefer CloudFormation over CDK
 - **docs/testing-guide.md**: Step-by-step testing instructions with expected responses for all scenarios
 
-### Excluded Files
-
-The following files are excluded from version control (see `.gitignore`):
-- `deploy-cdk.sh`: Local deployment script with your specific configuration
-- `deployment-commands.txt`: Deployment commands with sensitive parameters
-- `cdk-outputs.json`: Stack outputs including API endpoint and API key ID
-- `cdk/cdk.out/`: CDK synthesis output
-- `cdk/.venv/`: Python virtual environment
-
 ## Features
 
 - **Token Caching**: Reduces Cognito API calls and improves response times
