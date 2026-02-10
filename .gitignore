@@ -7,8 +7,6 @@
 !LICENSE
 !CONTRIBUTING.md
 !cognito-proxy-template.yaml
-!architecturediagrams/
-!architecturediagrams/**
 !docs/
 !docs/**
 !cdk/

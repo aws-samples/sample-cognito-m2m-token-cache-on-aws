@@ -114,10 +114,6 @@ This architecture ensures that:
 │   │   ├── architecture-diagram.png             # Basic architecture diagram
 │   │   └── architecture-with-waf.png            # Architecture with WAF protection
 │   └── testing-guide.md                         # Comprehensive testing instructions
-└── architecturediagrams/                        # Original architecture diagrams (source files)
-    ├── CognitoM2MArchitecture.drawio            # Editable diagram source
-    ├── CognitoM2MArchitecture-Page-1.drawio.png # Basic architecture export
-    └── CognitoM2MArchitecture-Page-2.drawio.png # Architecture with WAF export
 ```
 
 ### Key Files
