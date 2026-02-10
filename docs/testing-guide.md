@@ -53,6 +53,8 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
 }
 ```
 
+**HTTP Status**: 403 Forbidden
+
 ### Test 3: API Gateway with Invalid API Key
 
 This test validates that API Gateway blocks requests with an incorrect API key.
@@ -72,6 +74,8 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
   "message": "Forbidden"
 }
 ```
+
+**HTTP Status**: 403 Forbidden
 
 ### Test 4: Direct Cognito Access without API Key
 
