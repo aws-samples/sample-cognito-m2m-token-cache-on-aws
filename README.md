@@ -2,7 +2,9 @@
 
 ## Overview
 
-This project provides a CloudFormation template that deploys an API Gateway proxy in front of AWS Cognito's OAuth2 token endpoint. The proxy adds intelligent caching and API key-based access control, reducing load on Cognito and improving performance for machine-to-machine (M2M) authentication scenarios.
+This project provides both CloudFormation and AWS CDK (Python) implementations of an API Gateway proxy in front of AWS Cognito's OAuth2 token endpoint. The proxy adds intelligent caching and API key-based access control, reducing load on Cognito and improving performance for machine-to-machine (M2M) authentication scenarios.
+
+**Recommended**: Use the CDK implementation in the `cdk/` directory for better maintainability and type safety.
 
 ## Purpose
 
@@ -42,8 +44,16 @@ AWS Cognito OAuth2 Endpoint
 ```
 .
 ├── README.md                                    # This file
-├── cognito-proxy-template.yaml                  # Main CloudFormation template
-├── testcommands.txt                             # Sample curl commands for testing
+├── cognito-proxy-template.yaml                  # CloudFormation template (legacy)
+├── cdk/                                         # CDK Python implementation
+│   ├── app.py                                   # CDK app entry point
+│   ├── cdk/
+│   │   ├── __init__.py
+│   │   └── cognito_proxy_stack.py               # Main stack definition
+│   ├── tests/                                   # CDK tests
+│   ├── requirements.txt                         # Python dependencies
+│   ├── cdk.json                                 # CDK configuration
+│   └── README.md                                # CDK-specific documentation
 ├── .kiro/
 │   └── steering/                                # Project steering documents
 │       ├── project-overview.md
@@ -52,14 +62,7 @@ AWS Cognito OAuth2 Endpoint
 │   ├── CognitoM2MArchitecture-Page-1.drawio.png
 │   ├── CognitoM2MArchitecture-Page-2.drawio.png
 │   └── CognitoM2MArchitecture.drawio
-├── blog/
-│   ├── Blog_CognitoM2MWithApiGateway.docx
-│   ├── Blog_CognitoM2MWithApiGateway-V3.docx
-│   ├── Blog_CognitoM2MWithApiGateway-V4.docx
-│   ├── Blog_CognitoM2MWithApiGateway-KevinNotes.docx
-│   └── CognitoM2MWithApiGateway-InstructionGuide.pdf
-└── originaltemplate/
-    └── originaltemplate.yml                     # Original template reference
+└── testcommands.txt                             # Sample curl commands for testing
 ```
 
 ## Prerequisites
@@ -82,7 +85,39 @@ AWS Cognito OAuth2 Endpoint
 
 ## Deployment
 
-### Validate Template
+### Option 1: CDK Deployment (Recommended)
+
+The CDK implementation provides better type safety, maintainability, and follows AWS best practices.
+
+#### Prerequisites
+- Python 3.8+
+- AWS CDK CLI: `npm install -g aws-cdk`
+- AWS CLI configured with `Cognito-Isengard6` profile
+
+#### Setup
+
+```bash
+cd cdk
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### Deploy
+
+```bash
+cdk deploy \
+  --profile Cognito-Isengard6 \
+  -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com \
+  -c stage_name=dev \
+  -c cache_ttl_seconds=3600 \
+  -c cache_size_gb=0.5
+```
+
+See `cdk/README.md` for detailed CDK documentation.
+
+### Option 2: CloudFormation Template
+
+#### Validate Template
 
 ```bash
 aws cloudformation validate-template \

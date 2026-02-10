@@ -7,6 +7,15 @@
 !cognito-proxy-template.yaml
 !architecturediagrams/
 !architecturediagrams/**
+!cdk/
+!cdk/**
+
+# Ignore CDK build artifacts
+cdk/cdk.out/
+cdk/.venv/
+cdk/**/__pycache__/
+cdk/**/*.pyc
+cdk/**/*.egg-info/
 
 # macOS
 .DS_Store
