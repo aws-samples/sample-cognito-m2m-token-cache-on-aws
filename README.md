@@ -13,7 +13,7 @@ The proxy solves several challenges with direct Cognito OAuth2 token requests:
 - **Performance**: Caches OAuth2 tokens to reduce latency and Cognito API calls
 - **Cost Optimization**: Reduces Cognito usage costs through intelligent caching
 - **Access Control**: Adds API key requirement for additional security layer
-- **WAF Integration**: Provides API key for WAF rule validation
+- **WAF Protection**: Optional WAF WebACL that validates API key before allowing Cognito access
 - **Flexibility**: Supports multiple authentication methods (Authorization header, query params, or body params)
 
 ## Architecture
@@ -27,6 +27,8 @@ API Gateway Proxy (/oauth2/token)
        ↓
    [Cache Layer]
        ↓
+   [WAF WebACL - Optional]
+       ↓
 AWS Cognito OAuth2 Endpoint
 ```
 
@@ -35,9 +37,10 @@ AWS Cognito OAuth2 Endpoint
 1. **Caching**: Configurable cache (0.5GB - 237GB) with TTL (default 1 hour)
 2. **Cache Key**: Based on Authorization header for per-client caching
 3. **API Key Protection**: All requests require valid API key
-4. **Multiple Auth Methods**: Supports Authorization header, query parameters, or request body
-5. **Scope Support**: Handles OAuth2 scopes in requests
-6. **Encrypted Cache**: Cache data is encrypted at rest
+4. **WAF Protection**: Optional WAF WebACL validates API key before allowing Cognito access
+5. **Multiple Auth Methods**: Supports Authorization header, query parameters, or request body
+6. **Scope Support**: Handles OAuth2 scopes in requests
+7. **Encrypted Cache**: Cache data is encrypted at rest
 
 ## Project Structure
 
@@ -62,7 +65,8 @@ AWS Cognito OAuth2 Endpoint
 │   ├── CognitoM2MArchitecture-Page-1.drawio.png
 │   ├── CognitoM2MArchitecture-Page-2.drawio.png
 │   └── CognitoM2MArchitecture.drawio
-└── testcommands.txt                             # Sample curl commands for testing
+├── testcommands.txt                             # Legacy test commands
+└── test-instructions.txt                        # Comprehensive testing guide with WAF tests
 ```
 
 ## Prerequisites
@@ -111,11 +115,21 @@ cd cdk
 cdk deploy \
   --profile Cognito-Isengard6 \
   -c cognito_domain=YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com \
+  -c cognito_user_pool_arn=arn:aws:cognito-idp:REGION:ACCOUNT:userpool/POOL_ID \
   -c stage_name=dev \
   -c cache_ttl_seconds=3600 \
   -c cache_size_gb=0.5 \
+  -c enable_waf_protection=true \
   --outputs-file ../cdk-outputs.json
 ```
+
+**Parameters**:
+- `cognito_domain`: Your Cognito domain (required)
+- `cognito_user_pool_arn`: ARN of your Cognito User Pool (required if WAF enabled)
+- `stage_name`: API Gateway stage (default: dev)
+- `cache_ttl_seconds`: Cache TTL in seconds (default: 3600)
+- `cache_size_gb`: Cache size in GB (default: 0.5)
+- `enable_waf_protection`: Enable WAF WebACL protection (default: false)
 
 **Note**: Create local deployment scripts (`deploy-cdk.sh` or `deployment-commands.txt`) with your specific configuration. These files are gitignored to avoid committing sensitive domain information.
 
@@ -228,6 +242,9 @@ curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/dev/oauth2/tok
 - **Usage Plan**: Links API key to the API stage
 - **Cache Cluster**: For token response caching
 - **API Gateway Stage**: Deployment stage with caching enabled
+- **Lambda Function**: Custom resource to retrieve API key value (when WAF enabled)
+- **WAF WebACL**: Validates API key before allowing Cognito access (optional)
+- **WAF Association**: Links WebACL to Cognito User Pool (when WAF enabled)
 
 ## Caching Behavior
 
@@ -244,7 +261,12 @@ curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/dev/oauth2/tok
 2. **HTTPS Only**: All traffic is encrypted in transit
 3. **Encrypted Cache**: Cached tokens are encrypted at rest
 4. **Regional Endpoint**: Reduces latency and keeps traffic within region
-5. **WAF Integration**: API key can be used in WAF rules for additional protection
+5. **WAF Protection**: Optional WAF WebACL validates API key before allowing direct Cognito access
+   - Prevents unauthorized direct access to Cognito User Pool
+   - Only requests with the correct API key can reach Cognito
+   - WAF rule automatically configured with API key value during deployment
+   - Returns custom error message: "WAF is preventing direct access to Cognito. Please use the API Gateway endpoint with a valid API key."
+   - WAF associations may take 5-10 minutes to propagate after deployment
 
 ## Monitoring
 
@@ -270,10 +292,14 @@ Monitor the proxy using CloudWatch metrics:
 2. **Cache Not Working**: Verify Authorization header is consistent
 3. **Cognito Errors**: Check Cognito domain parameter is correct
 4. **403 Forbidden**: Verify API key is associated with usage plan
+5. **WAF Not Blocking**: WAF associations can take 5-10 minutes to propagate after deployment
 
 ### Testing
 
-See `testcommands.txt` for sample curl commands to test the deployment.
+See `test-instructions.txt` for comprehensive test commands including:
+- API Gateway requests with and without API keys
+- Direct Cognito access tests to verify WAF protection
+- Expected responses for each scenario
 
 ## Development
 

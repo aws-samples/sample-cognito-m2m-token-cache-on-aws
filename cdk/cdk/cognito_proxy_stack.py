@@ -2,9 +2,15 @@ from aws_cdk import (
     Stack,
     CfnOutput,
     Duration,
+    CustomResource,
     aws_apigateway as apigw,
+    aws_wafv2 as wafv2,
+    aws_lambda as lambda_,
+    aws_iam as iam,
+    custom_resources as cr,
 )
 from constructs import Construct
+import base64
 
 
 class CognitoProxyStack(Stack):
@@ -20,9 +26,11 @@ class CognitoProxyStack(Stack):
         scope: Construct,
         construct_id: str,
         cognito_domain: str,
+        cognito_user_pool_arn: str = None,
         stage_name: str = "dev",
         cache_ttl_seconds: int = 3600,
         cache_size_gb: str = "0.5",
+        enable_waf_protection: bool = True,
         **kwargs
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -31,6 +39,9 @@ class CognitoProxyStack(Stack):
         valid_cache_sizes = ["0.5", "1.6", "6.1", "13.5", "28.4", "58.2", "118", "237"]
         if cache_size_gb not in valid_cache_sizes:
             raise ValueError(f"cache_size_gb must be one of {valid_cache_sizes}")
+
+        if enable_waf_protection and not cognito_user_pool_arn:
+            raise ValueError("cognito_user_pool_arn is required when WAF protection is enabled")
 
         # Create API Gateway REST API
         api = apigw.RestApi(
@@ -42,7 +53,7 @@ class CognitoProxyStack(Stack):
             deploy=False,  # We'll create a custom deployment
         )
 
-        # Create API Key
+        # Create API Key (CDK will generate the value)
         api_key = apigw.ApiKey(
             self,
             "ProxyAPIKey",
@@ -132,7 +143,7 @@ grant_type=client_credentials&scope=
                 cache_key_parameters=["integration.request.header.Authorization"],
                 request_parameters={
                     "integration.request.header.Authorization": "method.request.header.Authorization",
-                    "integration.request.header.X-API-Key": "context.identity.apiKey",
+                    "integration.request.header.x-api-key": "method.request.header.x-api-key",
                 },
                 request_templates={
                     "application/x-www-form-urlencoded": request_template
@@ -153,6 +164,7 @@ grant_type=client_credentials&scope=
             request_parameters={
                 "method.request.header.Authorization": False,
                 "method.request.header.Accept": False,
+                "method.request.header.x-api-key": True,
             },
             method_responses=[
                 apigw.MethodResponse(
@@ -207,6 +219,155 @@ grant_type=client_credentials&scope=
         )
 
         usage_plan.add_api_key(api_key)
+
+        # Create WAF WebACL to protect Cognito User Pool
+        if enable_waf_protection:
+            # Create Lambda function to retrieve API key value
+            get_api_key_lambda = lambda_.Function(
+                self,
+                "GetApiKeyFunction",
+                runtime=lambda_.Runtime.PYTHON_3_12,
+                handler="index.handler",
+                code=lambda_.Code.from_inline("""
+import boto3
+import json
+
+apigateway = boto3.client('apigateway')
+
+def handler(event, context):
+    request_type = event['RequestType']
+    
+    if request_type == 'Create' or request_type == 'Update':
+        api_key_id = event['ResourceProperties']['ApiKeyId']
+        
+        try:
+            response = apigateway.get_api_key(
+                apiKey=api_key_id,
+                includeValue=True
+            )
+            api_key_value = response['value']
+            
+            return {
+                'PhysicalResourceId': api_key_id,
+                'Data': {
+                    'ApiKeyValue': api_key_value
+                }
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get API key: {str(e)}")
+    
+    elif request_type == 'Delete':
+        return {
+            'PhysicalResourceId': event['PhysicalResourceId']
+        }
+"""),
+                timeout=Duration.seconds(30),
+            )
+
+            # Grant permissions to read API keys
+            get_api_key_lambda.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["apigateway:GET"],
+                    resources=[
+                        f"arn:aws:apigateway:{self.region}::/apikeys/{api_key.key_id}"
+                    ],
+                )
+            )
+
+            # Create custom resource to get API key value
+            api_key_provider = cr.Provider(
+                self,
+                "ApiKeyProvider",
+                on_event_handler=get_api_key_lambda,
+            )
+
+            api_key_custom_resource = CustomResource(
+                self,
+                "ApiKeyCustomResource",
+                service_token=api_key_provider.service_token,
+                properties={
+                    "ApiKeyId": api_key.key_id,
+                },
+            )
+
+            # Get the API key value from custom resource
+            api_key_value = api_key_custom_resource.get_att_string("ApiKeyValue")
+
+            # Base64 encode the API key value for WAF matching
+            # Note: We can't base64 encode at synth time since it's a token
+            # The WAF will need to match the plain text value
+            
+            web_acl = wafv2.CfnWebACL(
+                self,
+                "CognitoProtectionWebACL",
+                scope="REGIONAL",
+                default_action=wafv2.CfnWebACL.DefaultActionProperty(
+                    block=wafv2.CfnWebACL.BlockActionProperty(
+                        custom_response=wafv2.CfnWebACL.CustomResponseProperty(
+                            response_code=403,
+                            custom_response_body_key="CognitoDenied"
+                        )
+                    )
+                ),
+                visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                    cloud_watch_metrics_enabled=True,
+                    metric_name="CognitoProtectionWebACL",
+                    sampled_requests_enabled=True
+                ),
+                rules=[
+                    wafv2.CfnWebACL.RuleProperty(
+                        name="allow-api-key-requests",
+                        priority=0,
+                        statement=wafv2.CfnWebACL.StatementProperty(
+                            byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
+                                search_string=api_key_value,
+                                field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(
+                                    single_header={"Name": "x-api-key"}
+                                ),
+                                text_transformations=[
+                                    wafv2.CfnWebACL.TextTransformationProperty(
+                                        priority=0,
+                                        type="NONE"
+                                    )
+                                ],
+                                positional_constraint="EXACTLY"
+                            )
+                        ),
+                        action=wafv2.CfnWebACL.RuleActionProperty(
+                            allow={}
+                        ),
+                        visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                            cloud_watch_metrics_enabled=True,
+                            metric_name="allow-api-key-requests",
+                            sampled_requests_enabled=True
+                        )
+                    )
+                ],
+                custom_response_bodies={
+                    "CognitoDenied": wafv2.CfnWebACL.CustomResponseBodyProperty(
+                        content_type="APPLICATION_JSON",
+                        content='{"message":"WAF is preventing direct access to Cognito. Please use the API Gateway endpoint with a valid API key."}'
+                    )
+                }
+            )
+
+            # Ensure WAF is created after we get the API key value
+            web_acl.node.add_dependency(api_key_custom_resource)
+
+            # Associate WAF with Cognito User Pool
+            wafv2.CfnWebACLAssociation(
+                self,
+                "CognitoWAFAssociation",
+                resource_arn=cognito_user_pool_arn,
+                web_acl_arn=web_acl.attr_arn
+            )
+
+            CfnOutput(
+                self,
+                "WebACLOutput",
+                description="WAF WebACL protecting Cognito User Pool",
+                value=web_acl.attr_arn,
+            )
 
         # Outputs
         CfnOutput(
