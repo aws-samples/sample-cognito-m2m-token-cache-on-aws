@@ -2,6 +2,7 @@
 import os
 import aws_cdk as cdk
 from cdk.cognito_proxy_stack import CognitoProxyStack
+from cdk_nag import AwsSolutionsChecks, NagSuppressions
 
 
 app = cdk.App()
@@ -47,5 +48,8 @@ CognitoProxyStack(
     ),
     description="Cognito OAuth2 Token Proxy with API Gateway Caching and WAF Protection",
 )
+
+# Add cdk-nag checks
+cdk.Aspects.of(app).add(AwsSolutionsChecks(verbose=True))
 
 app.synth()

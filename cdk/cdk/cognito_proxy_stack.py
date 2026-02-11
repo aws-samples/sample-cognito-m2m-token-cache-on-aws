@@ -3,10 +3,12 @@ from aws_cdk import (
     CfnOutput,
     Duration,
     CustomResource,
+    RemovalPolicy,
     aws_apigateway as apigw,
     aws_wafv2 as wafv2,
     aws_lambda as lambda_,
     aws_iam as iam,
+    aws_logs as logs,
     custom_resources as cr,
 )
 from constructs import Construct
@@ -42,6 +44,15 @@ class CognitoProxyStack(Stack):
 
         if enable_waf_protection and not cognito_user_pool_arn:
             raise ValueError("cognito_user_pool_arn is required when WAF protection is enabled")
+
+        # Create CloudWatch Log Group for API Gateway access logs
+        access_log_group = logs.LogGroup(
+            self,
+            "ApiGatewayAccessLogs",
+            log_group_name=f"/aws/apigateway/{construct_id}-access-logs",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
 
         # Create API Gateway REST API
         api = apigw.RestApi(
@@ -184,7 +195,7 @@ grant_type=client_credentials&scope=
             description="Deployment for Cognito OAuth2 Token Proxy",
         )
 
-        # Create stage with caching
+        # Create stage with caching and logging
         stage = apigw.Stage(
             self,
             "ApiGatewayStage",
@@ -192,14 +203,35 @@ grant_type=client_credentials&scope=
             stage_name=stage_name,
             cache_cluster_enabled=True,
             cache_cluster_size=cache_size_gb,
+            access_log_destination=apigw.LogGroupLogDestination(access_log_group),
+            access_log_format=apigw.AccessLogFormat.json_with_standard_fields(
+                caller=True,
+                http_method=True,
+                ip=True,
+                protocol=True,
+                request_time=True,
+                resource_path=True,
+                response_length=True,
+                status=True,
+                user=True,
+            ),
+            logging_level=apigw.MethodLoggingLevel.INFO,
+            data_trace_enabled=True,
+            metrics_enabled=True,
             method_options={
                 "/*/*": apigw.MethodDeploymentOptions(
                     caching_enabled=False,
+                    logging_level=apigw.MethodLoggingLevel.INFO,
+                    data_trace_enabled=True,
+                    metrics_enabled=True,
                 ),
                 "/oauth2/token/POST": apigw.MethodDeploymentOptions(
                     caching_enabled=True,
                     cache_ttl=Duration.seconds(cache_ttl_seconds),
                     cache_data_encrypted=True,
+                    logging_level=apigw.MethodLoggingLevel.INFO,
+                    data_trace_enabled=True,
+                    metrics_enabled=True,
                 ),
             },
         )
