@@ -20,11 +20,37 @@ Parameters:
     Description: Cache size in GB
 
 Resources:
+  # CloudWatch Log Group for API Gateway Access Logging
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${AWS::StackName}-access-logs'
+      RetentionInDays: 90
+
+  # IAM Role for API Gateway CloudWatch Logging
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'
+
+  # Account-level setting to enable API Gateway CloudWatch logging
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
   # API Key for WAF validation
   ProxyAPIKey:
     Type: AWS::ApiGateway::ApiKey
     Properties:
-      Name: !Sub '${AWS::StackName}-cognito-proxy-key'
       Description: 'API Key for Cognito proxy WAF validation'
       Enabled: true
 
@@ -35,7 +61,6 @@ Resources:
       - ApiGatewayStage
       - ApiGatewayDeployment
     Properties:
-      UsagePlanName: !Sub '${AWS::StackName}-cognito-proxy-plan'
       Description: 'Usage plan for Cognito proxy'
       ApiStages:
         - ApiId: !Ref CognitoProxy
@@ -74,6 +99,11 @@ Resources:
 
   TokenMethod:
     Type: AWS::ApiGateway::Method
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W59
+            reason: 'AuthorizationType is NONE because access control is enforced via API Key (ApiKeyRequired: true)'
     Properties:
       RestApiId: !Ref CognitoProxy
       ResourceId: !Ref TokenResource
@@ -99,7 +129,7 @@ Resources:
           integration.request.header.Authorization: 'method.request.header.Authorization'
           integration.request.header.X-API-Key: 'context.identity.apiKey'
         RequestTemplates:
-          application/x-www-form-urlencoded: !Sub |
+          application/x-www-form-urlencoded: |
             #if($input.params().header.containsKey("Authorization"))
             #set($context.requestOverride.header.Authorization = $input.params().header.get("Authorization"))
             #set($body = $input.body)
@@ -170,24 +200,36 @@ Resources:
 
   ApiGatewayStage:
     Type: AWS::ApiGateway::Stage
+    DependsOn: ApiGatewayAccount
     Properties:
       RestApiId: !Ref CognitoProxy
       DeploymentId: !Ref ApiGatewayDeployment
       StageName: !Ref StageName
+      TracingEnabled: true
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
       CacheClusterEnabled: true
       CacheClusterSize: !Ref CacheSize
       MethodSettings:
         - ResourcePath: '/*'
           HttpMethod: '*'
           CachingEnabled: false
+          LoggingLevel: INFO
         - ResourcePath: '/oauth2/token'
           HttpMethod: 'POST'
           CachingEnabled: true
           CacheTtlInSeconds: !Ref CacheTtlInSeconds
           CacheDataEncrypted: true
+          LoggingLevel: INFO
 
   ApiGatewayDeployment:
     Type: AWS::ApiGateway::Deployment
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W68
+            reason: 'Deployment is associated with a UsagePlan through the ApiGatewayStage resource'
     DependsOn:
       - TokenMethod
     Properties:

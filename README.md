@@ -30,6 +30,10 @@ At Cognito's pricing of $0.0055 per API call (after free tier), this represents 
 ## Table of Contents
 
 - [Architecture](#architecture)
+  - [Full Architecture](#full-architecture)
+  - [Request Flow Without WAF](#request-flow-without-waf)
+  - [Architecture with WAF Protection](#architecture-with-waf-protection)
+  - [Components](#components)
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Deployment](#deployment)
@@ -50,11 +54,17 @@ At Cognito's pricing of $0.0055 per API call (after free tier), this represents 
 
 The solution deploys an Amazon API Gateway REST API that proxies requests to Amazon Cognito's OAuth2 token endpoint. The proxy adds a caching layer to reduce latency and Cognito API calls, and requires API key authentication for access control.
 
-### Architecture Diagram
+### Full Architecture
+
+![Full Architecture](docs/images/architecture-overview.png)
+
+The architecture consists of three main components working together. Client applications send OAuth2 token requests to an Amazon API Gateway REST API (Regional endpoint), which acts as a proxy in front of Amazon Cognito. API Gateway enforces API key validation on every incoming request through a usage plan, ensuring only authorized consumers can access the token endpoint. Before forwarding a request to Cognito, API Gateway checks its built-in response cache, keyed on the Authorization header. On a cache hit, the cached token is returned immediately without contacting Cognito, reducing both latency and cost. On a cache miss, API Gateway forwards the client credentials grant request to the Cognito User Pool's `/oauth2/token` endpoint, caches the response for the configured TTL, and returns the token to the caller. The entire infrastructure is defined and provisioned through a CloudFormation stack (deployable via AWS CDK or the CloudFormation template directly).
+
+### Request Flow Without WAF
 
 ![Architecture Diagram](docs/images/architecture-diagram.png)
 
-The diagram above illustrates the basic architecture without WAF protection. The request flow is:
+The diagram above illustrates the request flow without WAF protection:
 
 1. **Client Application** sends an OAuth2 token request to the API Gateway endpoint with an API key
 2. **API Gateway** validates the API key and checks its cache for a valid token
@@ -111,7 +121,8 @@ This architecture ensures that:
 │           └── test_cdk_stack.py                # Stack validation tests
 ├── docs/                                        # Documentation
 │   ├── images/
-│   │   ├── architecture-diagram.png             # Basic architecture diagram
+│   │   ├── architecture-diagram.png             # Request flow without WAF
+│   │   ├── architecture-full.png                # Full architecture diagram
 │   │   └── architecture-with-waf.png            # Architecture with WAF protection
 │   └── testing-guide.md                         # Comprehensive testing instructions
 ```

@@ -24,5 +24,8 @@ deploy-cdk.sh
 deployment-commands.txt
 cdk-outputs.json
 
+# AppSec
+appsec/
+
 # macOS
 .DS_Store
