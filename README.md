@@ -1,18 +1,40 @@
 # Amazon Cognito OAuth2 Token Proxy with Caching
 
-This solution provides an Amazon API Gateway proxy in front of Amazon Cognito's OAuth2 token endpoint, adding intelligent caching and API key-based access control. By caching OAuth2 access tokens at the API Gateway layer, this solution significantly reduces the number of requests to Amazon Cognito, resulting in lower costs, improved performance, and better scalability for machine-to-machine (M2M) authentication scenarios.
+An Amazon API Gateway proxy for Amazon Cognito's OAuth2 token endpoint that adds intelligent caching and API key-based access control, reducing costs, improving performance, and scaling machine-to-machine (M2M) authentication scenarios.
 
-## What This Solution Does
+## Table of Contents
 
-In typical M2M authentication scenarios, applications frequently request OAuth2 access tokens from Amazon Cognito. Each request to Cognito incurs API costs and adds latency. This solution addresses these challenges by:
+- [Architecture](#architecture)
+  - [Full Architecture](#full-architecture)
+  - [Request Flow Without WAF](#request-flow-without-waf)
+  - [Request Flow With WAF Protection](#request-flow-with-waf-protection)
+  - [Components](#components)
+- [Usage](#usage)
+  - [Authentication Methods](#authentication-methods)
+  - [Response Format](#response-format)
+  - [Testing](#testing)
+  - [Monitoring](#monitoring)
+  - [Security Best Practices](#security-best-practices)
+- [Prerequisites](#prerequisites)
+- [Deployment](#deployment)
+  - [Deploy with AWS CDK (Recommended)](#deploy-with-aws-cdk-recommended)
+  - [Deploy with CloudFormation](#deploy-with-cloudformation)
+- [Accessing the Application](#accessing-the-application)
+- [Remove the Application](#remove-the-application)
+- [Contributing](#contributing)
+- [License](#license)
 
-1. **Intercepting Token Requests**: API Gateway sits between your applications and Cognito, intercepting all OAuth2 token requests
-2. **Intelligent Caching**: Valid tokens are cached at the API Gateway layer based on the Authorization header, eliminating redundant Cognito calls
-3. **Automatic Cache Management**: Cached tokens are automatically invalidated based on configurable TTL (time-to-live) settings
-4. **Access Control**: API key authentication ensures only authorized applications can request tokens
-5. **Optional WAF Protection**: AWS WAF can be enabled to prevent unauthorized direct access to your Cognito User Pool
+## Architecture
 
-## Cost Reduction Scenario
+The solution deploys an Amazon API Gateway REST API that proxies requests to Amazon Cognito's OAuth2 token endpoint. The proxy adds a caching layer to reduce latency and Cognito API calls, and requires API key authentication for access control.
+
+### Full Architecture
+
+![Full Architecture](docs/images/architecture-overview.png)
+
+The architecture consists of three main components working together. Client applications send OAuth2 token requests to an Amazon API Gateway REST API (Regional endpoint), which acts as a proxy in front of Amazon Cognito. API Gateway enforces API key validation on every incoming request through a usage plan, ensuring only authorized consumers can access the token endpoint. Before forwarding a request to Cognito, API Gateway checks its built-in response cache, keyed on the Authorization header. On a cache hit, the cached token is returned immediately without contacting Cognito, reducing both latency and cost. On a cache miss, API Gateway forwards the client credentials grant request to the Cognito User Pool's `/oauth2/token` endpoint, caches the response for the configured TTL, and returns the token to the caller. The entire infrastructure is defined and provisioned through a CloudFormation stack (deployable via AWS CDK or the CloudFormation template directly).
+
+#### Cost Reduction Example
 
 Consider an application that requests a new access token every 5 minutes (12 times per hour). With a 1-hour token expiration and this caching solution:
 
@@ -27,44 +49,9 @@ For 100 applications making similar requests:
 
 At Cognito's pricing of $0.0055 per API call (after free tier), this represents significant cost savings while also improving response times through cache hits (typically <10ms vs 100-200ms for Cognito calls).
 
-## Table of Contents
-
-- [Architecture](#architecture)
-  - [Full Architecture](#full-architecture)
-  - [Request Flow Without WAF](#request-flow-without-waf)
-  - [Architecture with WAF Protection](#architecture-with-waf-protection)
-  - [Components](#components)
-- [Features](#features)
-- [Prerequisites](#prerequisites)
-- [Deployment](#deployment)
-  - [Cost Considerations](#cost-considerations)
-  - [Deploy with AWS CDK](#deploy-with-aws-cdk)
-  - [Deploy with CloudFormation](#deploy-with-cloudformation)
-- [Usage](#usage)
-  - [Authentication Methods](#authentication-methods)
-  - [Testing the Deployment](#testing-the-deployment)
-- [Security](#security)
-- [Monitoring](#monitoring)
-- [Cleanup](#cleanup)
-- [Additional Resources](#additional-resources)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Architecture
-
-The solution deploys an Amazon API Gateway REST API that proxies requests to Amazon Cognito's OAuth2 token endpoint. The proxy adds a caching layer to reduce latency and Cognito API calls, and requires API key authentication for access control.
-
-### Full Architecture
-
-![Full Architecture](docs/images/architecture-overview.png)
-
-The architecture consists of three main components working together. Client applications send OAuth2 token requests to an Amazon API Gateway REST API (Regional endpoint), which acts as a proxy in front of Amazon Cognito. API Gateway enforces API key validation on every incoming request through a usage plan, ensuring only authorized consumers can access the token endpoint. Before forwarding a request to Cognito, API Gateway checks its built-in response cache, keyed on the Authorization header. On a cache hit, the cached token is returned immediately without contacting Cognito, reducing both latency and cost. On a cache miss, API Gateway forwards the client credentials grant request to the Cognito User Pool's `/oauth2/token` endpoint, caches the response for the configured TTL, and returns the token to the caller. The entire infrastructure is defined and provisioned through a CloudFormation stack (deployable via AWS CDK or the CloudFormation template directly).
-
 ### Request Flow Without WAF
 
 ![Architecture Diagram](docs/images/architecture-diagram.png)
-
-The diagram above illustrates the request flow without WAF protection:
 
 1. **Client Application** sends an OAuth2 token request to the API Gateway endpoint with an API key
 2. **API Gateway** validates the API key and checks its cache for a valid token
@@ -74,7 +61,7 @@ The diagram above illustrates the request flow without WAF protection:
 6. **API Gateway** caches the token based on the Authorization header and returns it to the client
 7. Subsequent requests with the same credentials receive the cached token until TTL expires
 
-### Architecture with WAF Protection
+### Request Flow With WAF Protection
 
 ![Architecture with WAF](docs/images/architecture-with-waf.png)
 
@@ -87,10 +74,7 @@ When WAF protection is enabled, an additional security layer is added:
 5. **Unauthorized Requests** receive a 403 Forbidden response with a descriptive error message
 6. **Authorized Requests** (with correct API key) proceed to Cognito for token generation
 
-This architecture ensures that:
-- Only requests through API Gateway (with valid API key) can access Cognito
-- Direct access to Cognito is prevented, enforcing centralized access control
-- All token requests benefit from caching, regardless of the authentication method used
+This ensures that only requests through API Gateway (with valid API key) can access Cognito, preventing direct access and enforcing centralized access control.
 
 ### Components
 
@@ -100,84 +84,119 @@ This architecture ensures that:
 - **AWS WAF (Optional)**: WebACL that validates API key before allowing direct Cognito access
 - **Amazon Cognito User Pool**: OAuth2 token endpoint for client credentials flow
 - **AWS Lambda**: Custom resource function to retrieve API key value for WAF configuration during deployment
+- **CloudWatch Logs**: Access logging for API Gateway requests
+- **AWS X-Ray**: Distributed tracing for request monitoring
 
-## Project Structure
+## Usage
 
-```
-.
-├── README.md                                    # Complete project documentation and deployment guide
-├── LICENSE                                      # MIT-0 License - permissive open source license
-├── CONTRIBUTING.md                              # Guidelines for contributing to this project
-├── cognito-proxy-template.yaml                  # CloudFormation template (alternative deployment)
-├── cdk/                                         # AWS CDK implementation (recommended)
-│   ├── app.py                                   # CDK app entry point with parameter handling
-│   ├── cdk.json                                 # CDK configuration
-│   ├── requirements.txt                         # Python dependencies
-│   ├── cdk/
-│   │   ├── __init__.py                          # Python package initialization
-│   │   └── cognito_proxy_stack.py               # Main CDK stack definition
-│   └── tests/                                   # CDK unit tests
-│       └── unit/
-│           └── test_cdk_stack.py                # Stack validation tests
-├── docs/                                        # Documentation
-│   ├── images/
-│   │   ├── architecture-diagram.png             # Request flow without WAF
-│   │   ├── architecture-full.png                # Full architecture diagram
-│   │   └── architecture-with-waf.png            # Architecture with WAF protection
-│   └── testing-guide.md                         # Comprehensive testing instructions
+### Authentication Methods
+
+The proxy supports three methods for providing OAuth2 credentials:
+
+#### Method 1: Authorization Header (Recommended)
+
+```bash
+curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
+  -d "grant_type=client_credentials&scope=your/scope"
 ```
 
-### Key Files
+#### Method 2: Request Body Parameters
 
-- **cdk/cdk/cognito_proxy_stack.py**: Contains the complete infrastructure definition including API Gateway, caching configuration, API key management, Lambda custom resource, and optional WAF WebACL
-- **cdk/app.py**: Entry point that handles CDK context parameters and validates required inputs
-- **cognito-proxy-template.yaml**: CloudFormation template for users who prefer CloudFormation over CDK
-- **docs/testing-guide.md**: Step-by-step testing instructions with expected responses for all scenarios
+```bash
+curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope"
+```
 
-## Features
+#### Method 3: Query Parameters
 
-- **Token Caching**: Reduces Cognito API calls and improves response times
-- **Cost Optimization**: Minimizes Cognito usage costs through intelligent caching
-- **API Key Protection**: Adds security layer requiring valid API key for all requests
-- **WAF Integration**: Optional WAF protection prevents unauthorized direct Cognito access
-- **Flexible Authentication**: Supports Authorization header, query parameters, or request body
-- **Encrypted Cache**: Cache data encrypted at rest
-- **Multiple Cache Sizes**: Choose from 0.5GB to 237GB based on your needs
+```bash
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d "grant_type=client_credentials"
+```
+
+### Response Format
+
+Successful requests return a JSON response:
+
+```json
+{
+  "access_token": "eyJraWQiOiJ...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
+
+### Testing
+
+For comprehensive testing instructions, including tests for API Gateway with and without API keys, and WAF protection validation, see the [Testing Guide](docs/testing-guide.md).
+
+### Monitoring
+
+Monitor the solution using Amazon CloudWatch metrics:
+
+- **CacheHitCount / CacheMissCount**: Measure cache effectiveness
+- **Count**: Total number of requests
+- **Latency**: Response times
+- **4XXError / 5XXError**: Error rates
+
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApiGateway \
+  --metric-name CacheHitCount \
+  --dimensions Name=ApiName,Value=CognitoAuthProxy \
+  --start-time 2024-01-01T00:00:00Z \
+  --end-time 2024-01-01T23:59:59Z \
+  --period 3600 \
+  --statistics Sum \
+  --profile YOUR_AWS_PROFILE
+```
+
+### Security Best Practices
+
+This solution implements multiple security layers: API key authentication, HTTPS-only traffic, encrypted cache at rest, regional endpoints, optional WAF protection, access logging, and X-Ray tracing.
+
+- Rotate API keys regularly
+- Use AWS Secrets Manager or AWS Systems Manager Parameter Store to store API keys
+- Enable AWS CloudTrail logging for API Gateway
+- Monitor API Gateway metrics in Amazon CloudWatch
+- Set appropriate cache TTL based on your token expiration time
+- Enable WAF protection to prevent direct Cognito access
 
 ## Prerequisites
 
 Before you deploy this solution, you must have the following:
 
-- An AWS account
+- An [AWS account](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 - An Amazon Cognito User Pool with OAuth2 client credentials configured
 - A Cognito domain (Amazon Cognito domain or custom domain)
-- AWS CLI version 2.x or later, configured with appropriate credentials
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) version 2.x or later, configured with appropriate credentials
 - For CDK deployment:
-  - Python 3.8 or later
-  - Node.js 20.x or later
-  - AWS CDK CLI 2.x (`npm install -g aws-cdk`)
+  - [Python](https://www.python.org/downloads/) >= 3.8
+  - [Node.js](https://nodejs.org/) >= 20.x
+  - [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html) >= 2.x (`npm install -g aws-cdk`)
 
 ## Deployment
 
-### Cost Considerations
+> **Important**: You are responsible for the cost of the AWS services used while running this sample deployment. There is no additional cost for using this sample. For full details, see the pricing pages for each AWS service you will be using in this sample. Prices are subject to change.
+>
+> - [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
+> - [Amazon Cognito pricing](https://aws.amazon.com/cognito/pricing/)
+> - [AWS WAF pricing](https://aws.amazon.com/waf/pricing/) (if WAF protection is enabled)
+> - [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/) (for custom resource)
 
-You are responsible for the cost of the AWS services used while running this solution. There is no additional cost for using this solution. For full details, see the pricing pages for each AWS service you use in this solution:
-
-- [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
-- [Amazon Cognito pricing](https://aws.amazon.com/cognito/pricing/)
-- [AWS WAF pricing](https://aws.amazon.com/waf/pricing/) (if WAF protection is enabled)
-- [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/) (for custom resource)
-
-Prices are subject to change.
-
-### Deploy with AWS CDK
-
-The AWS CDK implementation is the recommended deployment method as it provides better type safety, maintainability, and follows AWS best practices.
+### Deploy with AWS CDK (Recommended)
 
 #### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/josemiguel100/cognito-m2m-token-cache-on-aws.git
+git clone git@ssh.gitlab.aws.dev:jmgomez/cognito-m2m-token-cache-on-aws.git
 cd cognito-m2m-token-cache-on-aws
 ```
 
@@ -230,8 +249,6 @@ The deployment takes approximately 2-3 minutes. After deployment completes, the 
 
 ### Deploy with CloudFormation
 
-You can also deploy using the CloudFormation template directly.
-
 #### Step 1: Validate the template
 
 ```bash
@@ -246,6 +263,7 @@ aws cloudformation validate-template \
 aws cloudformation deploy \
   --template-file cognito-proxy-template.yaml \
   --stack-name cognito-oauth-proxy \
+  --capabilities CAPABILITY_IAM \
   --parameter-overrides \
     CognitoDomain=YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com \
     StageName=dev \
@@ -263,102 +281,22 @@ aws cloudformation describe-stacks \
   --profile YOUR_AWS_PROFILE
 ```
 
-## Usage
+## Accessing the Application
 
-### Authentication Methods
+After deployment, retrieve the API endpoint and API key from the stack outputs:
 
-The proxy supports three methods for providing OAuth2 credentials:
-
-#### Method 1: Authorization Header (Recommended)
-
-```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
-  -d "grant_type=client_credentials&scope=your/scope"
-```
-
-#### Method 2: Request Body Parameters
+1. The `ApiEndpointOutput` provides the URL: `https://<API_ID>.execute-api.<REGION>.amazonaws.com/<STAGE>/oauth2/token`
+2. Retrieve the API key value from the API Gateway console or via CLI:
 
 ```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope"
+aws apigateway get-api-keys --include-values --profile YOUR_AWS_PROFILE
 ```
 
-#### Method 3: Query Parameters
+3. Send a token request using any of the [authentication methods](#authentication-methods) described above.
 
-```bash
-curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -d "grant_type=client_credentials"
-```
+For detailed testing scenarios, see the [Testing Guide](docs/testing-guide.md).
 
-### Response Format
-
-Successful requests return a JSON response:
-
-```json
-{
-  "access_token": "eyJraWQiOiJ...",
-  "expires_in": 3600,
-  "token_type": "Bearer"
-}
-```
-
-### Testing the Deployment
-
-For comprehensive testing instructions, including tests for API Gateway with and without API keys, and WAF protection validation, see the [Testing Guide](docs/testing-guide.md).
-
-## Security
-
-This solution implements multiple security layers:
-
-1. **API Key Authentication**: All requests to the API Gateway endpoint require a valid `x-api-key` header
-2. **HTTPS Only**: All traffic is encrypted in transit using TLS
-3. **Encrypted Cache**: Cached tokens are encrypted at rest
-4. **Regional Endpoint**: Reduces latency and keeps traffic within your AWS region
-5. **WAF Protection** (Optional): When enabled, AWS WAF validates the API key before allowing requests to reach Cognito
-   - Blocks unauthorized direct access to the Cognito User Pool
-   - Returns descriptive error message for blocked requests
-   - Automatically configured with the correct API key value during deployment
-
-### Best Practices
-
-- Rotate API keys regularly
-- Use AWS Secrets Manager or AWS Systems Manager Parameter Store to store API keys
-- Enable AWS CloudTrail logging for API Gateway
-- Monitor API Gateway metrics in Amazon CloudWatch
-- Set appropriate cache TTL based on your token expiration time
-- Enable WAF protection to prevent direct Cognito access
-
-## Monitoring
-
-Monitor the solution using Amazon CloudWatch metrics:
-
-- **CacheHitCount / CacheMissCount**: Measure cache effectiveness
-- **Count**: Total number of requests
-- **Latency**: Response times
-- **4XXError / 5XXError**: Error rates
-
-To view metrics:
-
-```bash
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/ApiGateway \
-  --metric-name CacheHitCount \
-  --dimensions Name=ApiName,Value=CognitoAuthProxy \
-  --start-time 2024-01-01T00:00:00Z \
-  --end-time 2024-01-01T23:59:59Z \
-  --period 3600 \
-  --statistics Sum \
-  --profile YOUR_AWS_PROFILE
-```
-
-## Cleanup
+## Remove the Application
 
 To avoid incurring future charges, delete the resources created by this solution.
 
@@ -385,14 +323,6 @@ aws wafv2 disassociate-web-acl \
   --profile YOUR_AWS_PROFILE \
   --region REGION
 ```
-
-## Additional Resources
-
-- [Amazon API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/)
-- [Amazon Cognito Developer Guide](https://docs.aws.amazon.com/cognito/)
-- [AWS WAF Developer Guide](https://docs.aws.amazon.com/waf/)
-- [AWS CDK Developer Guide](https://docs.aws.amazon.com/cdk/)
-- [OAuth 2.0 Client Credentials Grant](https://oauth.net/2/grant-types/client-credentials/)
 
 ## Contributing
 
