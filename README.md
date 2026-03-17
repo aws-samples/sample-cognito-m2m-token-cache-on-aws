@@ -2,6 +2,8 @@
 
 An Amazon API Gateway proxy for Amazon Cognito's OAuth2 token endpoint that adds intelligent caching and API key-based access control, reducing costs, improving performance, and scaling machine-to-machine (M2M) authentication scenarios.
 
+This repository provides a deployable implementation of the architecture described in the AWS Security Blog post: [How to monitor, optimize, and secure Amazon Cognito machine-to-machine authorization](https://aws.amazon.com/blogs/security/how-to-monitor-optimize-and-secure-amazon-cognito-machine-to-machine-authorization/).
+
 ## Table of Contents
 
 - [Architecture](#architecture)
@@ -196,7 +198,7 @@ Before you deploy this solution, you must have the following:
 #### Step 1: Clone the repository
 
 ```bash
-git clone git@ssh.gitlab.aws.dev:jmgomez/cognito-m2m-token-cache-on-aws.git
+git clone https://github.com/josemiguel100/cognito-m2m-token-cache-on-aws.git
 cd cognito-m2m-token-cache-on-aws
 ```
 
