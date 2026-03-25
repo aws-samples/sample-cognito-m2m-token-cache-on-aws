@@ -78,7 +78,7 @@ cdk ls
 After deployment, the stack provides:
 
 - `ApiEndpoint`: Full URL to the OAuth2 token proxy endpoint
-- `ProxyAPIKey`: API Key ID (retrieve value from AWS Console)
+- `OriginVerifySecretArn`: Secrets Manager ARN for the origin verify secret (used internally by WAF)
 - `CacheClusterSize`: Configured cache size
 - `CacheTtl`: Configured cache TTL in seconds
 
@@ -104,10 +104,10 @@ cdk/
 The CDK stack creates:
 
 1. **API Gateway REST API**: Regional endpoint with `/oauth2/token` path
-2. **API Key**: For request authentication
-3. **Usage Plan**: Links API key to the API stage
-4. **Cache Cluster**: For token response caching
-5. **API Gateway Stage**: Deployment stage with caching enabled
+2. **Secrets Manager Secret**: Origin-verify token for WAF validation
+3. **Cache Cluster**: For token response caching
+4. **API Gateway Stage**: Deployment stage with caching enabled
+5. **WAF WebACL** (Optional): Protects Cognito from direct access
 
 ## Development
 

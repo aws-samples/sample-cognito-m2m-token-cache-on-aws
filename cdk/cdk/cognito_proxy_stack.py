@@ -2,17 +2,13 @@ from aws_cdk import (
     Stack,
     CfnOutput,
     Duration,
-    CustomResource,
     RemovalPolicy,
     aws_apigateway as apigw,
     aws_wafv2 as wafv2,
-    aws_lambda as lambda_,
-    aws_iam as iam,
     aws_logs as logs,
-    custom_resources as cr,
+    aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
-import base64
 
 
 class CognitoProxyStack(Stack):
@@ -20,7 +16,8 @@ class CognitoProxyStack(Stack):
     CDK Stack for Cognito OAuth2 Token Proxy with API Gateway Caching.
     
     This stack creates an API Gateway proxy in front of AWS Cognito's OAuth2 token endpoint,
-    adding intelligent caching and API key-based access control.
+    adding intelligent caching. WAF protection uses a custom origin-verify header to ensure
+    only requests from API Gateway can reach Cognito directly.
     """
 
     def __init__(
@@ -64,14 +61,21 @@ class CognitoProxyStack(Stack):
             deploy=False,  # We'll create a custom deployment
         )
 
-        # Create API Key (CDK will generate the value)
-        api_key = apigw.ApiKey(
+        # Create origin verify secret for WAF validation
+        origin_verify_secret = secretsmanager.Secret(
             self,
-            "ProxyAPIKey",
-            api_key_name=f"{construct_id}-cognito-proxy-key",
-            description="API Key for Cognito proxy WAF validation",
-            enabled=True,
+            "OriginVerifySecret",
+            description="Secret used by API Gateway to prove origin to WAF on Cognito",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                secret_string_template="{}",
+                generate_string_key="origin-verify-token",
+                password_length=64,
+                exclude_punctuation=True,
+            ),
         )
+
+        # Resolve the secret value for use in integration parameters and WAF
+        origin_verify_value = origin_verify_secret.secret_value_from_json("origin-verify-token")
 
         # Create /oauth2/token resource path
         oauth2_resource = api.root.add_resource("oauth2")
@@ -154,7 +158,7 @@ grant_type=client_credentials&scope=
                 cache_key_parameters=["integration.request.header.Authorization"],
                 request_parameters={
                     "integration.request.header.Authorization": "method.request.header.Authorization",
-                    "integration.request.header.x-api-key": "method.request.header.x-api-key",
+                    "integration.request.header.x-origin-verify": "stageVariables.originVerifyToken",
                 },
                 request_templates={
                     "application/x-www-form-urlencoded": request_template
@@ -171,11 +175,10 @@ grant_type=client_credentials&scope=
         token_resource.add_method(
             "POST",
             integration,
-            api_key_required=True,
+            api_key_required=False,
             request_parameters={
                 "method.request.header.Authorization": False,
                 "method.request.header.Accept": False,
-                "method.request.header.x-api-key": True,
             },
             method_responses=[
                 apigw.MethodResponse(
@@ -236,99 +239,14 @@ grant_type=client_credentials&scope=
             },
         )
 
-        # Create usage plan and link API key
-        usage_plan = apigw.UsagePlan(
-            self,
-            "ProxyUsagePlan",
-            name=f"{construct_id}-cognito-proxy-plan",
-            description="Usage plan for Cognito proxy",
-            api_stages=[
-                apigw.UsagePlanPerApiStage(
-                    api=api,
-                    stage=stage,
-                )
-            ],
-        )
-
-        usage_plan.add_api_key(api_key)
+        # Inject origin-verify token as a stage variable so the integration can reference it
+        cfn_stage = stage.node.default_child
+        cfn_stage.variables = {
+            "originVerifyToken": origin_verify_value.unsafe_unwrap()
+        }
 
         # Create WAF WebACL to protect Cognito User Pool
         if enable_waf_protection:
-            # Create Lambda function to retrieve API key value
-            get_api_key_lambda = lambda_.Function(
-                self,
-                "GetApiKeyFunction",
-                runtime=lambda_.Runtime.PYTHON_3_12,
-                handler="index.handler",
-                code=lambda_.Code.from_inline("""
-import boto3
-import json
-
-apigateway = boto3.client('apigateway')
-
-def handler(event, context):
-    request_type = event['RequestType']
-    
-    if request_type == 'Create' or request_type == 'Update':
-        api_key_id = event['ResourceProperties']['ApiKeyId']
-        
-        try:
-            response = apigateway.get_api_key(
-                apiKey=api_key_id,
-                includeValue=True
-            )
-            api_key_value = response['value']
-            
-            return {
-                'PhysicalResourceId': api_key_id,
-                'Data': {
-                    'ApiKeyValue': api_key_value
-                }
-            }
-        except Exception as e:
-            raise Exception(f"Failed to get API key: {str(e)}")
-    
-    elif request_type == 'Delete':
-        return {
-            'PhysicalResourceId': event['PhysicalResourceId']
-        }
-"""),
-                timeout=Duration.seconds(30),
-            )
-
-            # Grant permissions to read API keys
-            get_api_key_lambda.add_to_role_policy(
-                iam.PolicyStatement(
-                    actions=["apigateway:GET"],
-                    resources=[
-                        f"arn:aws:apigateway:{self.region}::/apikeys/{api_key.key_id}"
-                    ],
-                )
-            )
-
-            # Create custom resource to get API key value
-            api_key_provider = cr.Provider(
-                self,
-                "ApiKeyProvider",
-                on_event_handler=get_api_key_lambda,
-            )
-
-            api_key_custom_resource = CustomResource(
-                self,
-                "ApiKeyCustomResource",
-                service_token=api_key_provider.service_token,
-                properties={
-                    "ApiKeyId": api_key.key_id,
-                },
-            )
-
-            # Get the API key value from custom resource
-            api_key_value = api_key_custom_resource.get_att_string("ApiKeyValue")
-
-            # Base64 encode the API key value for WAF matching
-            # Note: We can't base64 encode at synth time since it's a token
-            # The WAF will need to match the plain text value
-            
             web_acl = wafv2.CfnWebACL(
                 self,
                 "CognitoProtectionWebACL",
@@ -348,13 +266,13 @@ def handler(event, context):
                 ),
                 rules=[
                     wafv2.CfnWebACL.RuleProperty(
-                        name="allow-api-key-requests",
+                        name="allow-origin-verify-requests",
                         priority=0,
                         statement=wafv2.CfnWebACL.StatementProperty(
                             byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
-                                search_string=api_key_value,
+                                search_string=origin_verify_value.unsafe_unwrap(),
                                 field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(
-                                    single_header={"Name": "x-api-key"}
+                                    single_header={"Name": "x-origin-verify"}
                                 ),
                                 text_transformations=[
                                     wafv2.CfnWebACL.TextTransformationProperty(
@@ -370,7 +288,7 @@ def handler(event, context):
                         ),
                         visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
                             cloud_watch_metrics_enabled=True,
-                            metric_name="allow-api-key-requests",
+                            metric_name="allow-origin-verify-requests",
                             sampled_requests_enabled=True
                         )
                     )
@@ -378,13 +296,10 @@ def handler(event, context):
                 custom_response_bodies={
                     "CognitoDenied": wafv2.CfnWebACL.CustomResponseBodyProperty(
                         content_type="APPLICATION_JSON",
-                        content='{"message":"WAF is preventing direct access to Cognito. Please use the API Gateway endpoint with a valid API key."}'
+                        content='{"message":"WAF is preventing direct access to Cognito. Please use the API Gateway endpoint."}'
                     )
                 }
             )
-
-            # Ensure WAF is created after we get the API key value
-            web_acl.node.add_dependency(api_key_custom_resource)
 
             # Associate WAF with Cognito User Pool
             wafv2.CfnWebACLAssociation(
@@ -411,9 +326,9 @@ def handler(event, context):
 
         CfnOutput(
             self,
-            "ProxyAPIKeyOutput",
-            description="API Key for WAF validation (use this in WAF rules)",
-            value=api_key.key_id,
+            "OriginVerifySecretOutput",
+            description="Secrets Manager ARN for the origin verify secret (used internally by WAF)",
+            value=origin_verify_secret.secret_arn,
         )
 
         CfnOutput(

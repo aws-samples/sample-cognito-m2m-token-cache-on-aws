@@ -47,32 +47,16 @@ Resources:
     Properties:
       CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
 
-  # API Key for WAF validation
-  ProxyAPIKey:
-    Type: AWS::ApiGateway::ApiKey
+  # Origin verify secret for WAF validation
+  OriginVerifySecret:
+    Type: AWS::SecretsManager::Secret
     Properties:
-      Description: 'API Key for Cognito proxy WAF validation'
-      Enabled: true
-
-  # Usage Plan for API Key
-  ProxyUsagePlan:
-    Type: AWS::ApiGateway::UsagePlan
-    DependsOn: 
-      - ApiGatewayStage
-      - ApiGatewayDeployment
-    Properties:
-      Description: 'Usage plan for Cognito proxy'
-      ApiStages:
-        - ApiId: !Ref CognitoProxy
-          Stage: !Ref StageName
-
-  # Link API Key to Usage Plan
-  ProxyUsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey
-    Properties:
-      KeyId: !Ref ProxyAPIKey
-      KeyType: API_KEY
-      UsagePlanId: !Ref ProxyUsagePlan
+      Description: 'Secret used by API Gateway to prove origin to WAF on Cognito'
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: 'origin-verify-token'
+        PasswordLength: 64
+        ExcludePunctuation: true
 
   CognitoProxy:
     Type: AWS::ApiGateway::RestApi
@@ -103,12 +87,12 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W59
-            reason: 'AuthorizationType is NONE because access control is enforced via API Key (ApiKeyRequired: true)'
+            reason: 'AuthorizationType is NONE because the endpoint is an open proxy to Cognito. Authentication is handled by Cognito itself via client credentials.'
     Properties:
       RestApiId: !Ref CognitoProxy
       ResourceId: !Ref TokenResource
       HttpMethod: POST
-      ApiKeyRequired: true
+      ApiKeyRequired: false
       AuthorizationType: NONE
       RequestParameters:
         method.request.header.Authorization: false
@@ -127,7 +111,6 @@ Resources:
           - 'integration.request.header.Authorization'
         RequestParameters:
           integration.request.header.Authorization: 'method.request.header.Authorization'
-          integration.request.header.X-API-Key: 'context.identity.apiKey'
         RequestTemplates:
           application/x-www-form-urlencoded: |
             #if($input.params().header.containsKey("Authorization"))
@@ -225,11 +208,6 @@ Resources:
 
   ApiGatewayDeployment:
     Type: AWS::ApiGateway::Deployment
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W68
-            reason: 'Deployment is associated with a UsagePlan through the ApiGatewayStage resource'
     DependsOn:
       - TokenMethod
     Properties:
@@ -246,6 +224,6 @@ Outputs:
   CacheTtl:
     Description: 'Cache TTL in seconds'
     Value: !Ref CacheTtlInSeconds
-  ProxyAPIKey:
-    Description: 'API Key for WAF validation (use this in WAF rules)'
-    Value: !Ref ProxyAPIKey
+  OriginVerifySecretArn:
+    Description: 'Secrets Manager ARN for the origin verify secret (used internally by WAF)'
+    Value: !Ref OriginVerifySecret
