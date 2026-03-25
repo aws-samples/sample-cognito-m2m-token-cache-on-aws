@@ -52,4 +52,29 @@ CognitoProxyStack(
 # Add cdk-nag checks
 cdk.Aspects.of(app).add(AwsSolutionsChecks(verbose=True))
 
+# Suppress expected cdk-nag findings
+stack = app.node.find_child("CognitoProxyStack")
+NagSuppressions.add_stack_suppressions(stack, [
+    {
+        "id": "AwsSolutions-APIG2",
+        "reason": "Request validation is not needed — the proxy forwards requests to Cognito which performs its own validation.",
+    },
+    {
+        "id": "AwsSolutions-APIG4",
+        "reason": "No authorization is needed on the proxy — Cognito handles authentication via client credentials.",
+    },
+    {
+        "id": "AwsSolutions-COG4",
+        "reason": "Cognito authorizer is not applicable — this is a proxy TO Cognito, not protected BY Cognito.",
+    },
+    {
+        "id": "AwsSolutions-SMG4",
+        "reason": "The origin-verify secret does not require rotation — it is an internal shared secret between API Gateway and WAF.",
+    },
+    {
+        "id": "AwsSolutions-APIG3",
+        "reason": "WAF is associated with the Cognito User Pool, not the API Gateway stage. The API Gateway is the origin, not the target.",
+    },
+])
+
 app.synth()

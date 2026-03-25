@@ -234,6 +234,8 @@ Before you deploy this solution, you must have the following:
 
 ### Deploy with AWS CDK (Recommended)
 
+The CDK deployment is the recommended method. It deploys the full solution including optional WAF protection to prevent direct access to Cognito. When WAF is enabled, API Gateway injects a secret `x-origin-verify` header (stored in Secrets Manager) into every proxied request, and WAF blocks any request to Cognito that doesn't include it.
+
 #### Step 1: Clone the repository
 
 ```bash
@@ -288,6 +290,8 @@ The deployment takes approximately 2-3 minutes. After deployment completes, the 
 **Note**: If you enable WAF protection, the WAF association with Cognito may take 5-10 minutes to propagate after deployment.
 
 ### Deploy with CloudFormation
+
+The CloudFormation template deploys the proxy with caching only — it does not include WAF protection. Use this option if you don't need to block direct access to Cognito, or if you prefer to manage WAF separately.
 
 #### Step 1: Validate the template
 
