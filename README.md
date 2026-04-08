@@ -19,6 +19,8 @@ This repository provides a deployable implementation of the architecture describ
   - [Security Best Practices](#security-best-practices)
 - [Prerequisites](#prerequisites)
 - [Deployment](#deployment)
+  - [Deploy with AWS CDK (Recommended)](#deploy-with-aws-cdk-recommended)
+  - [Deploy with CloudFormation (Advanced — Without WAF)](#deploy-with-cloudformation-advanced--without-waf)
 - [Accessing the Application](#accessing-the-application)
 - [Remove the Application](#remove-the-application)
 - [Contributing](#contributing)
@@ -191,9 +193,10 @@ Before you deploy this solution, you must have the following:
 - An Amazon Cognito User Pool with OAuth2 client credentials configured
 - A Cognito domain (Amazon Cognito managed domain)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) version 2.x or later, configured with appropriate credentials
-- [Python](https://www.python.org/downloads/) >= 3.8
-- [Node.js](https://nodejs.org/) >= 20.x
-- [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html) >= 2.x (`npm install -g aws-cdk`)
+- For CDK deployment (recommended):
+  - [Python](https://www.python.org/downloads/) >= 3.8
+  - [Node.js](https://nodejs.org/) >= 20.x
+  - [AWS CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html) >= 2.x (`npm install -g aws-cdk`)
 
 ## Deployment
 
@@ -202,6 +205,10 @@ Before you deploy this solution, you must have the following:
 > - [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
 > - [Amazon Cognito pricing](https://aws.amazon.com/cognito/pricing/)
 > - [AWS WAF pricing](https://aws.amazon.com/waf/pricing/)
+
+### Deploy with AWS CDK (Recommended)
+
+The CDK deployment is the recommended method. It deploys the full solution including WAF protection to prevent direct access to Cognito. API Gateway injects a secret `x-origin-verify` header (stored in Secrets Manager) into every proxied request, and WAF blocks any request to Cognito that doesn't include it.
 
 #### Step 1: Clone the repository
 
@@ -219,12 +226,19 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-#### Step 3: Configure deployment parameters
+#### Step 3: Bootstrap CDK (first time only)
 
-Create a deployment script with your configuration:
+If this is the first time deploying CDK in your account/region, you need to bootstrap the CDK toolkit:
 
 ```bash
-#!/bin/bash
+cdk bootstrap aws://ACCOUNT/REGION --profile YOUR_AWS_PROFILE
+```
+
+This creates the S3 bucket and IAM roles that CDK needs to deploy stacks. You only need to do this once per account/region combination.
+
+#### Step 4: Configure and deploy
+
+```bash
 cdk deploy \
   --profile YOUR_AWS_PROFILE \
   -c cognito_domain=YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com \
@@ -242,18 +256,49 @@ Replace the following values:
 - `ACCOUNT`: Your AWS account ID
 - `POOL_ID`: Your Cognito User Pool ID
 
-#### Step 4: Deploy the stack
-
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
 The deployment takes approximately 2-3 minutes. After deployment completes, the stack outputs include:
 - `ApiEndpointOutput`: The API Gateway endpoint URL
 - `WebACLOutput`: The WAF WebACL ARN
 
 **Note**: The WAF association with Cognito may take 5-10 minutes to propagate after deployment.
+
+### Deploy with CloudFormation (Advanced — Without WAF)
+
+A standalone CloudFormation template (`cognito-proxy-template.yaml`) is provided for users who already have an existing WAF deployment or prefer to manage WAF separately. This template deploys only the API Gateway caching proxy — it does not include WAF protection. You are responsible for configuring WAF to block direct access to your Cognito User Pool.
+
+> **Warning**: Without WAF protection, clients can bypass the proxy and call Cognito directly, defeating the purpose of caching. Only use this option if you have an existing WAF setup that you will configure to protect your Cognito endpoint.
+
+#### Step 1: Validate the template
+
+```bash
+aws cloudformation validate-template \
+  --template-body file://cognito-proxy-template.yaml \
+  --profile YOUR_AWS_PROFILE
+```
+
+#### Step 2: Deploy the stack
+
+```bash
+aws cloudformation deploy \
+  --template-file cognito-proxy-template.yaml \
+  --stack-name cognito-oauth-proxy \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    CognitoDomain=YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com \
+    StageName=dev \
+    CacheTtlInSeconds=3600 \
+    CacheSize=0.5 \
+  --profile YOUR_AWS_PROFILE
+```
+
+#### Step 3: Get stack outputs
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name cognito-oauth-proxy \
+  --query 'Stacks[0].Outputs' \
+  --profile YOUR_AWS_PROFILE
+```
 
 ## Accessing the Application
 
@@ -268,7 +313,7 @@ For detailed testing scenarios, see the [Testing Guide](docs/testing-guide.md).
 
 To avoid incurring future charges, delete the resources created by this solution.
 
-### Delete the Stack
+### Delete the CDK Stack
 
 ```bash
 cd cdk
@@ -282,6 +327,14 @@ aws wafv2 disassociate-web-acl \
   --resource-arn arn:aws:cognito-idp:REGION:ACCOUNT:userpool/POOL_ID \
   --profile YOUR_AWS_PROFILE \
   --region REGION
+```
+
+### Delete the CloudFormation Stack
+
+```bash
+aws cloudformation delete-stack \
+  --stack-name cognito-oauth-proxy \
+  --profile YOUR_AWS_PROFILE
 ```
 
 ## Contributing
