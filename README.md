@@ -166,14 +166,37 @@ Monitor the solution using Amazon CloudWatch metrics:
 - **4XXError / 5XXError**: Error rates
 
 ```bash
+# Cache hits
 aws cloudwatch get-metric-statistics \
   --namespace AWS/ApiGateway \
   --metric-name CacheHitCount \
   --dimensions Name=ApiName,Value=CognitoAuthProxy \
-  --start-time 2024-01-01T00:00:00Z \
-  --end-time 2024-01-01T23:59:59Z \
-  --period 3600 \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S)Z \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S)Z \
+  --period 300 \
   --statistics Sum \
+  --profile YOUR_AWS_PROFILE
+
+# Cache misses
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApiGateway \
+  --metric-name CacheMissCount \
+  --dimensions Name=ApiName,Value=CognitoAuthProxy \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S)Z \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S)Z \
+  --period 300 \
+  --statistics Sum \
+  --profile YOUR_AWS_PROFILE
+
+# Average latency
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApiGateway \
+  --metric-name Latency \
+  --dimensions Name=ApiName,Value=CognitoAuthProxy \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S)Z \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S)Z \
+  --period 300 \
+  --statistics Average \
   --profile YOUR_AWS_PROFILE
 ```
 
