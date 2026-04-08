@@ -27,5 +27,8 @@ cdk-outputs.json
 # AppSec
 appsec/
 
+# Testing
+testing/
+
 # macOS
 .DS_Store
