@@ -363,7 +363,7 @@ aws cloudformation delete-stack \
 
 ## Contributing
 
-Contributions are welcome! Please read the [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to contribute to this project.
+Contributions are welcome! Please read the [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to contribute to this project. See the [Code of Conduct](CODE_OF_CONDUCT.md) for community standards.
 
 ## License
 
