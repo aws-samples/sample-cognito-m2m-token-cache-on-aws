@@ -47,7 +47,7 @@ For 100 applications making similar requests:
 - **With caching**: 2,400 Cognito calls per day
 - **Monthly savings**: ~792,000 fewer Cognito API calls
 
-At Cognito's pricing of $0.0055 per API call (after free tier), this represents significant cost savings while also improving response times through cache hits (typically <10ms vs 100-200ms for Cognito calls).
+This reduction in M2M token requests translates directly into cost savings. For current pricing details, see the [Amazon Cognito pricing page](https://aws.amazon.com/cognito/pricing/).
 
 ### Request Flow — Direct Access Blocked
 
@@ -187,7 +187,7 @@ Before you deploy this solution, you must have the following:
 
 - An [AWS account](https://aws.amazon.com/premiumsupport/knowledge-center/create-and-activate-aws-account/)
 - An Amazon Cognito User Pool with OAuth2 client credentials configured
-- A Cognito domain (Amazon Cognito domain or custom domain)
+- A Cognito domain (Amazon Cognito managed domain)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) version 2.x or later, configured with appropriate credentials
 - [Python](https://www.python.org/downloads/) >= 3.8
 - [Node.js](https://nodejs.org/) >= 20.x
