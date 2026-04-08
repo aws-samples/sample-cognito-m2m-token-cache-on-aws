@@ -81,87 +81,27 @@ class CognitoProxyStack(Stack):
         token_resource = oauth2_resource.add_resource("token")
 
         # VTL request template for transforming requests
-        request_template = """#if($input.params().header.containsKey("Authorization"))
-#set($context.requestOverride.header.Authorization = $input.params().header.get("Authorization"))
-#set($body = $input.body)
-#set($pairs = $body.split("&"))
-#set($hasScope = false)
-#set($scopeValue = "")
-#foreach($pair in $pairs)
-#set($kv = $pair.split("="))
-#if($kv[0] == "scope")
-#set($hasScope = true)
-#if($kv.size() > 1)
-#set($scopeValue = $kv[1])
-#end
-#end
-#end
-#if($hasScope)
-grant_type=client_credentials&scope=$scopeValue
-#else
-grant_type=client_credentials&scope=
-#end
-#elseif($input.params().querystring.containsKey("client_id") && $input.params().querystring.containsKey("client_secret"))
-#set($clientId = $input.params().querystring.get("client_id"))
-#set($clientSecret = $input.params().querystring.get("client_secret"))
-#set($credentials = "$clientId:$clientSecret")
-#set($encodedCreds = $util.base64Encode($credentials))
-#set($context.requestOverride.header.Authorization = "Basic $encodedCreds")
-#if($input.params().querystring.containsKey("scope"))
-grant_type=client_credentials&scope=$input.params().querystring.get("scope")
-#else
-grant_type=client_credentials&scope=
-#end
-#else
-#set($body = $input.body)
-#set($pairs = $body.split("&"))
-#set($clientId = "")
-#set($clientSecret = "")
-#set($hasScope = false)
-#set($scopeValue = "")
-#foreach($pair in $pairs)
-#set($kv = $pair.split("="))
-#if($kv[0] == "client_id")
-#set($clientId = $kv[1])
-#end
-#if($kv[0] == "client_secret")
-#set($clientSecret = $kv[1])
-#end
-#if($kv[0] == "scope")
-#set($hasScope = true)
-#if($kv.size() > 1)
-#set($scopeValue = $kv[1])
-#end
-#end
-#end
-#if($clientId && $clientSecret)
-#set($credentials = "$clientId:$clientSecret")
-#set($encodedCreds = $util.base64Encode($credentials))
-#set($context.requestOverride.header.Authorization = "Basic $encodedCreds")
-#end
-#if($hasScope)
-grant_type=client_credentials&scope=$scopeValue
-#else
-grant_type=client_credentials&scope=
-#end
-#end
-#set($context.requestOverride.header.Accept = "application/json")"""
+        # All three auth methods are normalized to: Authorization header + scope in body.
+        # The VTL also sets x-cache-scope header for scope-based cache isolation.
+        # Directives are joined without newlines to prevent blank line output in the body.
+        request_template = '#set($scopeValue = "")#if($input.params().header.containsKey("Authorization"))#set($context.requestOverride.header.Authorization = $input.params().header.get("Authorization"))#set($body = $input.body)#set($pairs = $body.split("&"))#foreach($pair in $pairs)#set($kv = $pair.split("="))#if($kv[0] == "scope" && $kv.size() > 1)#set($scopeValue = $kv[1])#end#end#elseif($input.params().querystring.containsKey("client_id") && $input.params().querystring.containsKey("client_secret"))#set($clientId = $input.params().querystring.get("client_id"))#set($clientSecret = $input.params().querystring.get("client_secret"))#set($credentials = "$clientId:$clientSecret")#set($encodedCreds = $util.base64Encode($credentials))#set($context.requestOverride.header.Authorization = "Basic $encodedCreds")#if($input.params().querystring.containsKey("scope"))#set($scopeValue = $input.params().querystring.get("scope"))#end#else#set($body = $input.body)#set($pairs = $body.split("&"))#set($clientId = "")#set($clientSecret = "")#foreach($pair in $pairs)#set($kv = $pair.split("="))#if($kv[0] == "client_id")#set($clientId = $kv[1])#end#if($kv[0] == "client_secret")#set($clientSecret = $kv[1])#end#if($kv[0] == "scope" && $kv.size() > 1)#set($scopeValue = $kv[1])#end#end#if($clientId && $clientSecret)#set($credentials = "$clientId:$clientSecret")#set($encodedCreds = $util.base64Encode($credentials))#set($context.requestOverride.header.Authorization = "Basic $encodedCreds")#end#end#set($context.requestOverride.header.x-cache-scope = $scopeValue)#set($context.requestOverride.header.Accept = "application/json")grant_type=client_credentials&scope=$scopeValue'
 
         # Create HTTP integration to Cognito
         integration = apigw.HttpIntegration(
             f"https://{cognito_domain}/oauth2/token",
             http_method="POST",
+            proxy=False,
             options=apigw.IntegrationOptions(
                 passthrough_behavior=apigw.PassthroughBehavior.WHEN_NO_TEMPLATES,
                 cache_namespace=token_resource.node.id,
                 cache_key_parameters=[
                     "integration.request.header.Authorization",
-                    "integration.request.querystring.scope",
+                    "integration.request.header.x-cache-scope",
                 ],
                 request_parameters={
                     "integration.request.header.Authorization": "method.request.header.Authorization",
                     "integration.request.header.x-origin-verify": "stageVariables.originVerifyToken",
-                    "integration.request.querystring.scope": "method.request.querystring.scope",
+                    "integration.request.header.x-cache-scope": "method.request.header.x-cache-scope",
                 },
                 request_templates={
                     "application/x-www-form-urlencoded": request_template
@@ -182,6 +122,9 @@ grant_type=client_credentials&scope=
             request_parameters={
                 "method.request.header.Authorization": False,
                 "method.request.header.Accept": False,
+                "method.request.header.x-cache-scope": False,
+                "method.request.querystring.client_id": False,
+                "method.request.querystring.client_secret": False,
                 "method.request.querystring.scope": False,
             },
             method_responses=[

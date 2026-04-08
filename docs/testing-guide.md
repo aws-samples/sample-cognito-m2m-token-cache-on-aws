@@ -14,12 +14,12 @@ Before testing, ensure you have:
 
 ### Test 1: Token Request via API Gateway (Authorization Header)
 
-Validates that the proxy returns a token when using the Authorization header method.
+Validates that the proxy returns a token when using the Authorization header method. Scope is passed in the request body.
 
 **Expected Result**: ✓ Success — Returns OAuth2 access token
 
 ```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=YOUR_SCOPE"
@@ -36,27 +36,29 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
 
 ### Test 2: Token Request via API Gateway (Request Body)
 
-Validates that the proxy returns a token when credentials are passed in the request body.
+Validates that the proxy returns a token when credentials and scope are passed in the request body.
 
 **Expected Result**: ✓ Success — Returns OAuth2 access token
 
 ```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=YOUR_SCOPE"
 ```
 
 ### Test 3: Token Request via API Gateway (Query Parameters)
 
-Validates that the proxy returns a token when credentials are passed as query parameters.
+Validates that the proxy returns a token when credentials and scope are passed as query parameters. The scope value must be URL-encoded in the query string.
 
 **Expected Result**: ✓ Success — Returns OAuth2 access token
 
 ```bash
-curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=YOUR_SCOPE" \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=YOUR_URL_ENCODED_SCOPE" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials"
 ```
+
+**Note**: The scope must be URL-encoded when passed as a query parameter. For example, `https://my-api/read` becomes `https%3A%2F%2Fmy-api%2Fread`.
 
 ### Test 4: Direct Cognito Access (WAF Blocks)
 
@@ -65,7 +67,7 @@ Validates that WAF blocks direct access to Cognito, forcing clients through the 
 **Expected Result**: ✗ Failure — 403 Forbidden
 
 ```bash
-curl -X POST https://YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com/oauth2/token \
+curl -X POST "https://YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=YOUR_SCOPE"
@@ -84,19 +86,21 @@ curl -X POST https://YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com/oauth2/to
 
 Validates that the API Gateway cache returns the same token on repeated requests.
 
-1. Run Test 1 and note the `access_token` value and response time
-2. Run Test 1 again immediately with the same credentials and scope
+1. Run the first request and note the `access_token` value and response time
+2. Run the same request again immediately
 3. The second request should return the exact same `access_token` and be faster (cache hit)
 
 ```bash
 # First request (cache miss)
-curl -s -w "\nTime: %{time_total}s\n" -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -s -w "\nTime: %{time_total}s\n" \
+  -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=YOUR_SCOPE"
 
 # Second request (cache hit — same token, faster response)
-curl -s -w "\nTime: %{time_total}s\n" -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -s -w "\nTime: %{time_total}s\n" \
+  -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=YOUR_SCOPE"
@@ -104,7 +108,7 @@ curl -s -w "\nTime: %{time_total}s\n" -X POST https://API_ID.execute-api.REGION.
 
 ### Test 6: Scope-Based Cache Isolation
 
-Validates that different scopes produce different cached tokens. The cache key includes both the Authorization header and the scope parameter.
+Validates that different scopes produce different cached tokens.
 
 1. Request a token with scope A
 2. Request a token with scope B (same credentials)
@@ -112,13 +116,13 @@ Validates that different scopes produce different cached tokens. The cache key i
 
 ```bash
 # Request with scope A
-curl -s -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -s -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=SCOPE_A"
 
 # Request with scope B (should return a different token)
-curl -s -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -s -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=SCOPE_B"
@@ -176,3 +180,8 @@ aws cloudwatch get-metric-statistics \
 - Verify the client ID and client secret are correct
 - Ensure the app client has `client_credentials` grant enabled
 - Check that the requested scope is allowed for the app client
+
+### Method 3: invalid_scope Error
+
+- Ensure the scope value is URL-encoded in the query string
+- For example, `https://my-api/read` must be sent as `scope=https%3A%2F%2Fmy-api%2Fread`

@@ -114,7 +114,7 @@ The proxy supports three methods for providing OAuth2 credentials:
 #### Method 1: Authorization Header (Recommended)
 
 ```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
   -d "grant_type=client_credentials&scope=your/scope"
@@ -123,7 +123,7 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
 #### Method 2: Request Body Parameters
 
 ```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope"
 ```
@@ -131,10 +131,12 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
 #### Method 3: Query Parameters
 
 ```bash
-curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your/scope" \
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=your%2Fscope" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials"
 ```
+
+The scope can be passed in the request body (methods 1 and 2) or as a query string parameter (method 3). When using method 3, the scope value must be URL-encoded in the query string. The cache isolates tokens by both credentials and scope, so different scopes produce different cached tokens.
 
 ### Response Format
 
