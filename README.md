@@ -207,6 +207,7 @@ This solution implements multiple security layers: HTTPS-only traffic, encrypted
 - Enable AWS CloudTrail logging for API Gateway
 - Monitor API Gateway metrics in Amazon CloudWatch
 - Set appropriate cache TTL based on your token expiration time
+- Implement a scheduled rotation of the origin-verify secret stored in Secrets Manager. When rotating, update the WAF rule to accept both the old and new secret values during the transition, then update the API Gateway stage variable with the new value, and finally remove the old value from the WAF rule
 
 ## Prerequisites
 
