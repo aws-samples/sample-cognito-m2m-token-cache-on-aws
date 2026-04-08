@@ -237,8 +237,8 @@ The CDK deployment is the recommended method. It deploys the full solution inclu
 #### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/josemiguel100/cognito-m2m-token-cache-on-aws.git
-cd cognito-m2m-token-cache-on-aws
+git clone https://github.com/aws-samples/sample-cognito-m2m-token-cache-on-aws.git
+cd sample-cognito-m2m-token-cache-on-aws
 ```
 
 #### Step 2: Set up the Python virtual environment

@@ -7,6 +7,8 @@
 !LICENSE
 !CONTRIBUTING.md
 !cognito-proxy-template.yaml
+!.github/
+!.github/**
 !docs/
 !docs/**
 !cdk/
@@ -29,6 +31,9 @@ appsec/
 
 # Testing
 testing/
+
+# License reports
+license-reports/
 
 # macOS
 .DS_Store

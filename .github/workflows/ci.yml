@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cfn-lint:
+    name: CloudFormation Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+      - name: Run cfn-lint
+        run: cfn-lint cognito-proxy-template.yaml
+
+  cfn-nag:
+    name: CloudFormation Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cfn_nag
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby
+          sudo gem install cfn-nag
+      - name: Run cfn_nag
+        run: cfn_nag_scan --input-path cognito-proxy-template.yaml
+
+  cdk-synth:
+    name: CDK Synth & Nag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+      - name: Install Python dependencies
+        working-directory: cdk
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: CDK Synth (validates stack and runs cdk-nag)
+        working-directory: cdk
+        run: |
+          source .venv/bin/activate
+          cdk synth \
+            -c cognito_domain=example.auth.us-east-1.amazoncognito.com \
+            -c cognito_user_pool_arn=arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_example
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+      - name: Install dependencies
+        working-directory: cdk
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        working-directory: cdk
+        run: |
+          source .venv/bin/activate
+          pytest tests/
