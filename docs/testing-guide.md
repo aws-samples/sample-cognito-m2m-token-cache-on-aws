@@ -5,24 +5,24 @@ This guide provides comprehensive test commands to validate your Cognito OAuth2 
 ## Prerequisites
 
 Before testing, ensure you have:
-- Deployed the solution successfully
-- Retrieved the API endpoint URL from stack outputs
-- Retrieved the API key value from AWS API Gateway console or stack outputs
+- Deployed the solution successfully via CDK
+- Retrieved the API endpoint URL from stack outputs (`ApiEndpointOutput`)
 - Your Cognito client credentials (client ID and client secret)
+- Your Cognito domain (e.g., `your-prefix.auth.us-east-1.amazoncognito.com`)
 
 ## Test Scenarios
 
-### Test 1: API Gateway with Correct API Key
+### Test 1: Token Request via API Gateway (Authorization Header)
 
-This test validates that the API Gateway endpoint works correctly with a valid API key.
+Validates that the proxy returns a token when using the Authorization header method.
 
-**Expected Result**: ✓ Success - Returns OAuth2 access token
+**Expected Result**: ✓ Success — Returns OAuth2 access token
 
 ```bash
 curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET"
+  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
+  -d "grant_type=client_credentials&scope=YOUR_SCOPE"
 ```
 
 **Expected Response**:
@@ -34,111 +34,108 @@ curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token 
 }
 ```
 
-### Test 2: API Gateway without API Key
+### Test 2: Token Request via API Gateway (Request Body)
 
-This test validates that API Gateway blocks requests without an API key.
+Validates that the proxy returns a token when credentials are passed in the request body.
 
-**Expected Result**: ✗ Failure - 403 Forbidden
-
-```bash
-curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET"
-```
-
-**Expected Response**:
-```json
-{
-  "message": "Forbidden"
-}
-```
-
-**HTTP Status**: 403 Forbidden
-
-### Test 3: API Gateway with Invalid API Key
-
-This test validates that API Gateway blocks requests with an incorrect API key.
-
-**Expected Result**: ✗ Failure - 403 Forbidden
+**Expected Result**: ✓ Success — Returns OAuth2 access token
 
 ```bash
 curl -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: invalid-key-value" \
-  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET"
+  -d "grant_type=client_credentials&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=YOUR_SCOPE"
 ```
 
-**Expected Response**:
-```json
-{
-  "message": "Forbidden"
-}
+### Test 3: Token Request via API Gateway (Query Parameters)
+
+Validates that the proxy returns a token when credentials are passed as query parameters.
+
+**Expected Result**: ✓ Success — Returns OAuth2 access token
+
+```bash
+curl -X POST "https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&scope=YOUR_SCOPE" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials"
 ```
 
-**HTTP Status**: 403 Forbidden
+### Test 4: Direct Cognito Access (WAF Blocks)
 
-### Test 4: Direct Cognito Access without API Key
+Validates that WAF blocks direct access to Cognito, forcing clients through the API Gateway proxy.
 
-This test validates that WAF blocks direct access to Cognito without the API key.
-
-**Expected Result**: ✗ Failure - 403 Forbidden (after WAF propagation)
+**Expected Result**: ✗ Failure — 403 Forbidden
 
 ```bash
 curl -X POST https://YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
-  -d "grant_type=client_credentials"
+  -d "grant_type=client_credentials&scope=YOUR_SCOPE"
 ```
 
 **Expected Response**:
 ```json
 {
-  "message": "WAF is preventing direct access to Cognito. Please use the API Gateway endpoint with a valid API key."
+  "message": "WAF is preventing direct access to Cognito. Please use the API Gateway endpoint."
 }
 ```
 
 **Note**: WAF associations may take 5-10 minutes to propagate after deployment. If this test initially succeeds, wait a few minutes and try again.
 
-### Test 5: Direct Cognito Access with API Key
+### Test 5: Cache Hit Validation
 
-This test validates that WAF allows direct Cognito access when the correct API key is provided.
+Validates that the API Gateway cache returns the same token on repeated requests.
 
-**Expected Result**: ✓ Success - Returns OAuth2 access token
+1. Run Test 1 and note the `access_token` value and response time
+2. Run Test 1 again immediately with the same credentials and scope
+3. The second request should return the exact same `access_token` and be faster (cache hit)
 
 ```bash
-curl -X POST https://YOUR_COGNITO_DOMAIN.auth.REGION.amazoncognito.com/oauth2/token \
+# First request (cache miss)
+curl -s -w "\nTime: %{time_total}s\n" -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -H "x-api-key: YOUR_API_KEY" \
   -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
-  -d "grant_type=client_credentials"
+  -d "grant_type=client_credentials&scope=YOUR_SCOPE"
+
+# Second request (cache hit — same token, faster response)
+curl -s -w "\nTime: %{time_total}s\n" -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
+  -d "grant_type=client_credentials&scope=YOUR_SCOPE"
 ```
 
-**Expected Response**:
-```json
-{
-  "access_token": "eyJraWQiOiJ...",
-  "expires_in": 3600,
-  "token_type": "Bearer"
-}
+### Test 6: Scope-Based Cache Isolation
+
+Validates that different scopes produce different cached tokens. The cache key includes both the Authorization header and the scope parameter.
+
+1. Request a token with scope A
+2. Request a token with scope B (same credentials)
+3. The tokens should be different (different `jti` claim)
+
+```bash
+# Request with scope A
+curl -s -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
+  -d "grant_type=client_credentials&scope=SCOPE_A"
+
+# Request with scope B (should return a different token)
+curl -s -X POST https://API_ID.execute-api.REGION.amazonaws.com/STAGE/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Authorization: Basic $(echo -n 'CLIENT_ID:CLIENT_SECRET' | base64)" \
+  -d "grant_type=client_credentials&scope=SCOPE_B"
 ```
 
 ## Test Summary
 
-| Test | Endpoint | API Key | Expected Result |
-|------|----------|---------|-----------------|
-| 1 | API Gateway | Valid | ✓ Success - Returns token |
-| 2 | API Gateway | None | ✗ 403 Forbidden |
-| 3 | API Gateway | Invalid | ✗ 403 Forbidden |
-| 4 | Direct Cognito | None | ✗ 403 Forbidden (WAF blocks) |
-| 5 | Direct Cognito | Valid | ✓ Success - Returns token |
+| Test | Endpoint | Method | Expected Result |
+|------|----------|--------|-----------------|
+| 1 | API Gateway | Authorization header | ✓ Returns token |
+| 2 | API Gateway | Request body | ✓ Returns token |
+| 3 | API Gateway | Query parameters | ✓ Returns token |
+| 4 | Direct Cognito | Any | ✗ 403 Forbidden (WAF blocks) |
+| 5 | API Gateway | Repeated request | ✓ Same token, faster response |
+| 6 | API Gateway | Different scopes | ✓ Different tokens per scope |
 
-## Cache Testing
-
-To test cache behavior:
-
-1. Run Test 1 and note the response time
-2. Run Test 1 again immediately with the same credentials
-3. The second request should be faster (cache hit)
+## Monitoring Cache Behavior
 
 To verify cache hits in CloudWatch:
 
@@ -156,12 +153,6 @@ aws cloudwatch get-metric-statistics \
 
 ## Troubleshooting
 
-### API Gateway Returns 403 Forbidden
-
-- Verify the API key is correct
-- Check that the API key is associated with the usage plan
-- Ensure the `x-api-key` header is included in the request
-
 ### Direct Cognito Access Not Blocked by WAF
 
 - Wait 5-10 minutes for WAF association to propagate
@@ -175,16 +166,13 @@ aws cloudwatch get-metric-statistics \
 
 ### Cache Not Working
 
-- Verify the Authorization header is consistent between requests
+- Verify the cache cluster status is `AVAILABLE` (takes ~5-10 minutes after deployment)
+- Ensure the Authorization header and scope are consistent between requests
 - Check cache TTL hasn't expired
 - Review CloudWatch metrics for cache hit/miss counts
 
-## Additional Testing
+### Invalid Credentials
 
-For production deployments, consider testing:
-
-- Token expiration and refresh behavior
-- Concurrent request handling
-- Cache invalidation scenarios
-- Different OAuth2 scopes
-- Error handling for invalid credentials
+- Verify the client ID and client secret are correct
+- Ensure the app client has `client_credentials` grant enabled
+- Check that the requested scope is allowed for the app client
