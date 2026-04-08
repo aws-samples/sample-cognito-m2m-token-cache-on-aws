@@ -123,9 +123,9 @@ pytest
 mypy cdk/
 ```
 
-## Comparison with CloudFormation
+## Comparison with Standalone CloudFormation
 
-This CDK implementation provides the same functionality as `cognito-proxy-template.yaml` with these benefits:
+This CDK implementation provides the full solution with these benefits:
 
 - Type safety and IDE autocomplete
 - Easier parameter validation

@@ -25,11 +25,10 @@ class CognitoProxyStack(Stack):
         scope: Construct,
         construct_id: str,
         cognito_domain: str,
-        cognito_user_pool_arn: str = None,
+        cognito_user_pool_arn: str,
         stage_name: str = "dev",
         cache_ttl_seconds: int = 3600,
         cache_size_gb: str = "0.5",
-        enable_waf_protection: bool = True,
         **kwargs
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -39,8 +38,8 @@ class CognitoProxyStack(Stack):
         if cache_size_gb not in valid_cache_sizes:
             raise ValueError(f"cache_size_gb must be one of {valid_cache_sizes}")
 
-        if enable_waf_protection and not cognito_user_pool_arn:
-            raise ValueError("cognito_user_pool_arn is required when WAF protection is enabled")
+        if not cognito_user_pool_arn:
+            raise ValueError("cognito_user_pool_arn is required for WAF protection")
 
         # Create CloudWatch Log Group for API Gateway access logs
         access_log_group = logs.LogGroup(
@@ -155,10 +154,14 @@ grant_type=client_credentials&scope=
             options=apigw.IntegrationOptions(
                 passthrough_behavior=apigw.PassthroughBehavior.WHEN_NO_TEMPLATES,
                 cache_namespace=token_resource.node.id,
-                cache_key_parameters=["integration.request.header.Authorization"],
+                cache_key_parameters=[
+                    "integration.request.header.Authorization",
+                    "integration.request.querystring.scope",
+                ],
                 request_parameters={
                     "integration.request.header.Authorization": "method.request.header.Authorization",
                     "integration.request.header.x-origin-verify": "stageVariables.originVerifyToken",
+                    "integration.request.querystring.scope": "method.request.querystring.scope",
                 },
                 request_templates={
                     "application/x-www-form-urlencoded": request_template
@@ -179,6 +182,7 @@ grant_type=client_credentials&scope=
             request_parameters={
                 "method.request.header.Authorization": False,
                 "method.request.header.Accept": False,
+                "method.request.querystring.scope": False,
             },
             method_responses=[
                 apigw.MethodResponse(
@@ -246,75 +250,74 @@ grant_type=client_credentials&scope=
         }
 
         # Create WAF WebACL to protect Cognito User Pool
-        if enable_waf_protection:
-            web_acl = wafv2.CfnWebACL(
-                self,
-                "CognitoProtectionWebACL",
-                scope="REGIONAL",
-                default_action=wafv2.CfnWebACL.DefaultActionProperty(
-                    block=wafv2.CfnWebACL.BlockActionProperty(
-                        custom_response=wafv2.CfnWebACL.CustomResponseProperty(
-                            response_code=403,
-                            custom_response_body_key="CognitoDenied"
+        web_acl = wafv2.CfnWebACL(
+            self,
+            "CognitoProtectionWebACL",
+            scope="REGIONAL",
+            default_action=wafv2.CfnWebACL.DefaultActionProperty(
+                block=wafv2.CfnWebACL.BlockActionProperty(
+                    custom_response=wafv2.CfnWebACL.CustomResponseProperty(
+                        response_code=403,
+                        custom_response_body_key="CognitoDenied"
+                    )
+                )
+            ),
+            visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                cloud_watch_metrics_enabled=True,
+                metric_name="CognitoProtectionWebACL",
+                sampled_requests_enabled=True
+            ),
+            rules=[
+                wafv2.CfnWebACL.RuleProperty(
+                    name="allow-origin-verify-requests",
+                    priority=0,
+                    statement=wafv2.CfnWebACL.StatementProperty(
+                        byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
+                            search_string=origin_verify_value.unsafe_unwrap(),
+                            field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(
+                                single_header={"Name": "x-origin-verify"}
+                            ),
+                            text_transformations=[
+                                wafv2.CfnWebACL.TextTransformationProperty(
+                                    priority=0,
+                                    type="NONE"
+                                )
+                            ],
+                            positional_constraint="EXACTLY"
                         )
+                    ),
+                    action=wafv2.CfnWebACL.RuleActionProperty(
+                        allow={}
+                    ),
+                    visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                        cloud_watch_metrics_enabled=True,
+                        metric_name="allow-origin-verify-requests",
+                        sampled_requests_enabled=True
                     )
-                ),
-                visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
-                    cloud_watch_metrics_enabled=True,
-                    metric_name="CognitoProtectionWebACL",
-                    sampled_requests_enabled=True
-                ),
-                rules=[
-                    wafv2.CfnWebACL.RuleProperty(
-                        name="allow-origin-verify-requests",
-                        priority=0,
-                        statement=wafv2.CfnWebACL.StatementProperty(
-                            byte_match_statement=wafv2.CfnWebACL.ByteMatchStatementProperty(
-                                search_string=origin_verify_value.unsafe_unwrap(),
-                                field_to_match=wafv2.CfnWebACL.FieldToMatchProperty(
-                                    single_header={"Name": "x-origin-verify"}
-                                ),
-                                text_transformations=[
-                                    wafv2.CfnWebACL.TextTransformationProperty(
-                                        priority=0,
-                                        type="NONE"
-                                    )
-                                ],
-                                positional_constraint="EXACTLY"
-                            )
-                        ),
-                        action=wafv2.CfnWebACL.RuleActionProperty(
-                            allow={}
-                        ),
-                        visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
-                            cloud_watch_metrics_enabled=True,
-                            metric_name="allow-origin-verify-requests",
-                            sampled_requests_enabled=True
-                        )
-                    )
-                ],
-                custom_response_bodies={
-                    "CognitoDenied": wafv2.CfnWebACL.CustomResponseBodyProperty(
-                        content_type="APPLICATION_JSON",
-                        content='{"message":"WAF is preventing direct access to Cognito. Please use the API Gateway endpoint."}'
-                    )
-                }
-            )
+                )
+            ],
+            custom_response_bodies={
+                "CognitoDenied": wafv2.CfnWebACL.CustomResponseBodyProperty(
+                    content_type="APPLICATION_JSON",
+                    content='{"message":"WAF is preventing direct access to Cognito. Please use the API Gateway endpoint."}'
+                )
+            }
+        )
 
-            # Associate WAF with Cognito User Pool
-            wafv2.CfnWebACLAssociation(
-                self,
-                "CognitoWAFAssociation",
-                resource_arn=cognito_user_pool_arn,
-                web_acl_arn=web_acl.attr_arn
-            )
+        # Associate WAF with Cognito User Pool
+        wafv2.CfnWebACLAssociation(
+            self,
+            "CognitoWAFAssociation",
+            resource_arn=cognito_user_pool_arn,
+            web_acl_arn=web_acl.attr_arn
+        )
 
-            CfnOutput(
-                self,
-                "WebACLOutput",
-                description="WAF WebACL protecting Cognito User Pool",
-                value=web_acl.attr_arn,
-            )
+        CfnOutput(
+            self,
+            "WebACLOutput",
+            description="WAF WebACL protecting Cognito User Pool",
+            value=web_acl.attr_arn,
+        )
 
         # Outputs
         CfnOutput(
