@@ -18,6 +18,7 @@
 # Ignore CDK build artifacts
 cdk/cdk.out/
 cdk/.venv/
+cdk/cdk.context.json
 cdk/**/__pycache__/
 cdk/**/*.pyc
 cdk/**/*.egg-info/
