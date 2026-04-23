@@ -6,7 +6,7 @@ This directory contains the AWS CDK (Python) implementation of the Cognito OAuth
 
 - Python 3.8 or later
 - AWS CDK CLI installed (`npm install -g aws-cdk`)
-- AWS CLI configured with `Cognito-Isengard6` profile
+- AWS CLI configured with appropriate credentials
 - Virtual environment activated
 
 ## Setup
@@ -48,7 +48,7 @@ cdk synth -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com
 
 ```bash
 cdk deploy \
-  --profile Cognito-Isengard6 \
+  --profile YOUR_AWS_PROFILE \
   -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com \
   -c stage_name=dev \
   -c cache_ttl_seconds=3600 \
@@ -58,13 +58,13 @@ cdk deploy \
 ### Diff Against Deployed Stack
 
 ```bash
-cdk diff --profile Cognito-Isengard6 -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com
+cdk diff --profile YOUR_AWS_PROFILE -c cognito_domain=your-domain.auth.us-east-1.amazoncognito.com
 ```
 
 ### Destroy Stack
 
 ```bash
-cdk destroy --profile Cognito-Isengard6
+cdk destroy --profile YOUR_AWS_PROFILE
 ```
 
 ### List Stacks
